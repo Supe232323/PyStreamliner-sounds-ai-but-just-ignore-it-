@@ -1,6 +1,4 @@
-
-    
-        import ast
+import ast
 import sys
 import difflib
 from pathlib import Path
@@ -30,31 +28,32 @@ class PyStreamliner:
         return cleaned
 
     def _find_unused_variables(self, tree):
-        """
-        Detects variables that are assigned but never used anywhere else.
-        """
         assigned = {}
+        assign_lines = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         assigned[target.id] = getattr(target, 'lineno', '?')
+                        assign_lines.setdefault(target.id, set()).add(target.lineno)
 
         used = set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.Assign):
-                continue
             if isinstance(node, ast.Name):
-                used.add(node.id)
+                lineno = getattr(node, 'lineno', None)
+                if node.id in assign_lines:
+                    if lineno not in assign_lines[node.id]:
+                        used.add(node.id)
+                else:
+                    used.add(node.id)
 
         for name, lineno in assigned.items():
             if name not in used:
-                self.report["unused_variables"].append(f"Line {lineno}: '{name}' is assigned but never used")
+                self.report["unused_variables"].append(
+                    f"Line {lineno}: '{name}' is assigned but never used"
+                )
 
     def _find_unused_functions(self, tree):
-        """
-        Detects functions that are defined but never called.
-        """
         defined = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
@@ -70,12 +69,11 @@ class PyStreamliner:
 
         for name, lineno in defined.items():
             if name not in called and name != "main":
-                self.report["unused_functions"].append(f"Line {lineno}: '{name}' is defined but never called")
+                self.report["unused_functions"].append(
+                    f"Line {lineno}: '{name}' is defined but never called"
+                )
 
     def _find_bad_variable_names(self, tree):
-        """
-        Flags variables with vague/meaningless names like x, y, temp, foo, etc.
-        """
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
@@ -85,10 +83,6 @@ class PyStreamliner:
                         )
 
     def _remove_unused_imports(self, tree, code: str) -> str:
-        """
-        Properly detects unused imports by checking if the imported name
-        is actually referenced anywhere else in the code.
-        """
         imported_names = {}
 
         for node in ast.walk(tree):
@@ -136,9 +130,6 @@ class PyStreamliner:
         return '\n'.join(cleaned_lines)
 
     def _remove_duplicate_lines(self, code: str) -> str:
-        """
-        Only removes consecutive duplicate lines.
-        """
         lines = code.splitlines()
         cleaned_lines = []
         prev_line = None
@@ -167,9 +158,6 @@ class PyStreamliner:
         return '\n'.join(cleaned_lines)
 
     def show_diff(self, original: str, cleaned: str):
-        """
-        Shows a diff of what changed between original and cleaned code.
-        """
         original_lines = original.splitlines(keepends=True)
         cleaned_lines = cleaned.splitlines(keepends=True)
         diff = list(difflib.unified_diff(
@@ -182,9 +170,9 @@ class PyStreamliner:
             print("\n--- Changes ---")
             for line in diff:
                 if line.startswith("+") and not line.startswith("+++"):
-                    print(f"\033[92m{line}\033[0m", end="")  # green
+                    print(f"\033[92m{line}\033[0m", end="")
                 elif line.startswith("-") and not line.startswith("---"):
-                    print(f"\033[91m{line}\033[0m", end="")  # red
+                    print(f"\033[91m{line}\033[0m", end="")
                 else:
                     print(line, end="")
             print("\n---------------\n")
@@ -230,52 +218,3 @@ Vague variable names:         {len(self.report["bad_variable_names"])}
 Duplicate lines removed:      {len(self.report["duplicate_lines"])}
 
 {details}"""
-
-
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python streamliner.py your_messy_code.py")
-        print("       The cleaned file will be saved as your_messy_code_cleaned.py")
-        return
-
-    file_path = Path(sys.argv[1])
-
-    if not file_path.exists():
-        print(f"❌ File not found: {file_path}")
-        return
-
-    if file_path.suffix != ".py":
-        print(f"❌ This tool only works on .py files, got: {file_path.suffix}")
-        return
-
-    original_code = file_path.read_text(encoding="utf-8")
-
-    try:
-        tree = ast.parse(original_code)
-    except SyntaxError as e:
-        print(f"❌ Your file has a syntax error and can't be parsed: {e}")
-        return
-
-    streamliner = PyStreamliner()
-    cleaned_code = streamliner.analyze_and_clean(original_code)
-
-    print(streamliner.get_report())
-    streamliner.show_diff(original_code, cleaned_code)
-
-    cleaned_path = file_path.with_stem(file_path.stem + "_cleaned")
-    confirm = input(f"Save cleaned file as '{cleaned_path.name}'? (y/n): ").strip().lower()
-    if confirm != 'y':
-        print("Cancelled. No files were changed.")
-        return
-
-    cleaned_path.write_text(cleaned_code, encoding="utf-8")
-
-    report_path = Path("streamliner_report.txt")
-    report_path.write_text(streamliner.get_report(), encoding="utf-8")
-
-    print(f"✅ Cleaned file saved as: {cleaned_path.name}")
-    print(f"✅ Full report saved as: streamliner_report.txt")
-
-
-if __name__ == "__main__":
-    main()
