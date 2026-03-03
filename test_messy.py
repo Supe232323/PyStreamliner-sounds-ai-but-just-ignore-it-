@@ -1,24 +1,31 @@
+import os
+import sys
 import math
 import random
-import time
 
-name = "bro"
-age = 12
-
-x = 10
-if x > 5:
-    print("big number")
-else:
-    print("small number")
-
-y = x * 2
-y = x * 2   # this line is repeated on purpose
-
+name = "Alice"
 score = 100
-print("Your score is", score)
+level = 5
 
-z = 50
-if z == 50:
-    print("exactly 50")
+if level > 3:
+    print("high level")
 else:
-    print("not 50")
+    print("low level")
+
+total = score + level
+total = score + level
+
+result = total * 2
+result = total * 2
+
+print("Game over")
+print("Final score:", score)
+
+if score == 100:
+    print("perfect")
+else:
+    print("not perfect")
+
+x = 42
+y = x + 8
+print("Result:", result)
