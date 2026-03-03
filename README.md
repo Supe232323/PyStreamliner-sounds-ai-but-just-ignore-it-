@@ -1,24 +1,16 @@
 # PyStreamliner
 
-**Automated Python Code Optimization Tool**
+Simple tool that cleans up messy Python code
 
-PyStreamliner performs static analysis on Python source code to:
-- Detect and remove unused imports and variables
-- Identify duplicate expressions and redundant logic
-- Simplify complex statements (if-else → ternary, loops → comprehensions where safe)
-- Generate a cleaned version with a detailed optimization report
+It looks for repeated lines, unused imports, and weird if-else stuff, then fixes them automatically and gives you a cleaner version of your code.
 
-Designed for developers who want faster, cleaner, more maintainable code.
+I made this because I hate spending forever cleaning up code, so now it just does it for you.
 
-## Features
-- Pure Python (no external dependencies for core functionality)
-- AST-based analysis for accuracy and safety
-- Detailed before/after report
-- Command-line interface
-- Ready for GitHub Actions CI (optional)
+## How to use it
 
-## Installation
+1. Clone the repo or download the files  
+2. Put your messy Python file in the same folder  
+3. Run this command:
+
 ```bash
-git clone https://github.com/YOUR-USERNAME/PyStreamliner.git
-cd PyStreamliner
-pip install -r requirements.txt
+python streamliner.py your_messy_file.py
