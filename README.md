@@ -1,6 +1,6 @@
 # PyStreamliner
 
-Simple tool that cleans up messy Python code
+Simple tool made by opus 4.6-thinking that cleans up messy Python code
 
 It looks for repeated lines, unused imports, and weird if-else stuff, then fixes them automatically and gives you a cleaner version of your code.
 
