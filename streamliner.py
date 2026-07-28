@@ -890,9 +890,18 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "-n", "--no-color",
         action="store_true",
         default=False,
-        help="Strip ANSI character codes for clean log piping.",
+        help="Strip ANSI character codes for clean log piping."
+    )
+    parser.add_argument(
+        "-w", "--warn-only",
+        action="store_true",
+        default=False,
+        help="Run strictly as a passive scanner. Print issues and exit without modifying any files."
     )
     return parser
+
+
+
 
 
 
