@@ -2,27 +2,23 @@
 # Copyright 2026 Supe232323
 #!/usr/bin/env python3
 """PyStreamliner — A conservative, single-file, command-line Python source code cleaner.
-
 Two-tier model:
-  Tier 1 (Auto-fix):  Provably safe modifications only.
+  Tier 1 (Auto-fix): Provably safe modifications only.
   Tier 2 (Warn-only): Detection + report, zero modification.
 """
 from __future__ import annotations
 
 import argparse
 import ast
-import copy
 import dataclasses
 import difflib
 import re
 import shutil
 import sys
-import textwrap
 from pathlib import Path
 from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 # ─── ANSI Color Constants ────────────────────────────────────────────────────
-
 RESET = "\033[0m"
 RED = "\033[31m"
 GREEN = "\033[32m"
@@ -32,21 +28,16 @@ BOLD = "\033[1m"
 DIM = "\033[2m"
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-
 MAX_CONSECUTIVE_BLANKS = 2
-
 VAGUE_NAMES: FrozenSet[str] = frozenset({
     "x", "y", "z", "temp", "tmp", "foo", "bar", "baz",
     "a", "b", "c", "d", "e", "f",
 })
 
-
 # ─── Data Structures ─────────────────────────────────────────────────────────
-
 @dataclasses.dataclass
 class ImportFinding:
     """A single import statement with usage information."""
-
     lineno: int
     end_lineno: int
     original_text: str
@@ -55,13 +46,12 @@ class ImportFinding:
     used_names: list[str]
     is_from_import: bool
     indent: str
-   module: str | None = None
+    module: str | None = None
 
 
 @dataclasses.dataclass
 class Warning:
     """A Tier 2 warning for manual review."""
-
     category: str
     name: str
     lineno: int
@@ -71,7 +61,6 @@ class Warning:
 @dataclasses.dataclass
 class AnalysisResult:
     """Complete analysis output."""
-
     unused_imports: List[ImportFinding]
     warnings: List[Warning]
     all_names_in_all: Set[str]
@@ -80,7 +69,6 @@ class AnalysisResult:
 @dataclasses.dataclass
 class CleaningStats:
     """Counts of auto-fix actions taken."""
-
     unused_imports_removed: int = 0
     duplicate_lines_removed: int = 0
     blank_lines_reduced: int = 0
@@ -89,13 +77,11 @@ class CleaningStats:
 @dataclasses.dataclass
 class ImportDetail:
     """Detail line for the report."""
-
     lineno: int
     text: str
 
 
 # ─── AST Parent Map Builder ──────────────────────────────────────────────────
-
 def _build_parent_map(tree: ast.AST) -> Dict[int, ast.AST]:
     """Build a mapping from id(child) -> parent node for the entire AST.
 
@@ -111,7 +97,6 @@ def _build_parent_map(tree: ast.AST) -> Dict[int, ast.AST]:
 
 
 # ─── SourceAnalyzer ───────────────────────────────────────────────────────────
-
 class SourceAnalyzer:
     """Analyzes Python source code for issues without modifying it."""
 
@@ -131,14 +116,12 @@ class SourceAnalyzer:
         self._collect_type_checking_imports()
         self._used_names = self._collect_all_used_names()
         self._collect_all_list_names()
-
         unused_imports = self._find_unused_imports()
         warnings: List[Warning] = []
         warnings.extend(self._find_unused_variables())
         warnings.extend(self._find_unused_functions())
         warnings.extend(self._find_vague_names())
         warnings.extend(self._find_shadowed_builtins())
-
         return AnalysisResult(
             unused_imports=unused_imports,
             warnings=warnings,
@@ -146,7 +129,6 @@ class SourceAnalyzer:
         )
 
     # ── Name collection helpers ───────────────────────────────────────────
-
     def _collect_type_checking_imports(self) -> None:
         """Identify import names inside ``if TYPE_CHECKING:`` blocks.
 
@@ -213,12 +195,10 @@ class SourceAnalyzer:
                         self._all_names.add(elt.value)
 
     # ── Unused imports ────────────────────────────────────────────────────
-
     def _find_unused_imports(self) -> List[ImportFinding]:
         """Detect imports whose bound names are never referenced."""
         assert self._used_names is not None
         findings: List[ImportFinding] = []
-
         for node in ast.iter_child_nodes(self._tree):
             # Skip imports guarded by ``if TYPE_CHECKING:``
             if self._is_inside_type_checking_block(node):
@@ -229,7 +209,6 @@ class SourceAnalyzer:
                 result = self._check_from_import(node)
                 if result is not None:
                     findings.append(result)
-
         return findings
 
     def _is_inside_type_checking_block(self, target: ast.AST) -> bool:
@@ -257,7 +236,6 @@ class SourceAnalyzer:
         line_text = self._get_line_text(node.lineno)
         indent = self._get_indent(line_text)
         end_lineno = getattr(node, "end_lineno", node.lineno) or node.lineno
-
         for alias in node.names:
             bound = alias.asname if alias.asname else alias.name.split(".")[0]
             if bound in self._used_names or bound in self._all_names:
@@ -272,34 +250,27 @@ class SourceAnalyzer:
                 is_from_import=False,
                 indent=indent,
             ))
-
         return findings
 
     def _check_from_import(self, node: ast.ImportFrom) -> Optional[ImportFinding]:
         """Check a 'from x import y' statement (including multiline)."""
         assert self._used_names is not None
-
         if node.module and node.module == "__future__":
             return None
-
         if any(alias.name == "*" for alias in node.names):
             return None
-
         line_text = self._get_line_text(node.lineno)
         indent = self._get_indent(line_text)
         end_lineno = getattr(node, "end_lineno", node.lineno) or node.lineno
-
         # Build the full original text for multiline imports
         if end_lineno > node.lineno:
             original_lines = self._lines[node.lineno - 1:end_lineno]
             original_text = "".join(original_lines).rstrip()
         else:
             original_text = line_text.rstrip()
-
         bound_names: List[str] = []
         unused: List[str] = []
         used: List[str] = []
-
         for alias in node.names:
             bound = alias.asname if alias.asname else alias.name
             bound_names.append(bound)
@@ -307,10 +278,8 @@ class SourceAnalyzer:
                 used.append(alias.name if not alias.asname else f"{alias.name} as {alias.asname}")
             else:
                 unused.append(bound)
-
         if not unused:
             return None
-
         return ImportFinding(
             lineno=node.lineno,
             end_lineno=end_lineno,
@@ -324,7 +293,6 @@ class SourceAnalyzer:
         )
 
     # ── Unused variables ──────────────────────────────────────────────────
-
     def _find_unused_variables(self) -> List[Warning]:
         """Detect variables assigned but never read.
 
@@ -334,7 +302,6 @@ class SourceAnalyzer:
         assert self._used_names is not None
         warnings: List[Warning] = []
         assigned = self._collect_assigned_names()
-
         for name, lineno in assigned:
             if name == "_":
                 continue
@@ -350,7 +317,6 @@ class SourceAnalyzer:
                 lineno=lineno,
                 message=f"\u26a0 Unused variable '{name}' at line {lineno}",
             ))
-
         return warnings
 
     def _collect_assigned_names(self) -> List[Tuple[str, int]]:
@@ -360,14 +326,13 @@ class SourceAnalyzer:
         because the name is not actually bound to a runtime value.
         """
         assigned: List[Tuple[str, int]] = []
-
         for node in ast.walk(self._tree):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     self._extract_names_from_target(target, assigned)
             elif isinstance(node, ast.AnnAssign):
                 # Only include annotated assignments that actually have a value
-                # (``x: int = 5``).  Pure annotations (``x: int``) are
+                # (``x: int = 5``). Pure annotations (``x: int``) are
                 # declarations, not assignments.
                 if node.value is not None and node.target is not None:
                     self._extract_names_from_target(node.target, assigned)
@@ -379,7 +344,6 @@ class SourceAnalyzer:
                         self._extract_names_from_target(item.optional_vars, assigned)
             elif isinstance(node, ast.NamedExpr):
                 self._extract_names_from_target(node.target, assigned)
-
         return assigned
 
     def _extract_names_from_target(
@@ -395,7 +359,6 @@ class SourceAnalyzer:
                 self._extract_names_from_target(elt, result)
 
     # ── Unused functions ──────────────────────────────────────────────────
-
     def _find_unused_functions(self) -> List[Warning]:
         """Detect top-level and class-level functions that are never called.
 
@@ -404,51 +367,39 @@ class SourceAnalyzer:
         """
         assert self._used_names is not None
         warnings: List[Warning] = []
-
         # Collect all function / method definitions across the tree
         func_nodes: List[Tuple[ast.AST, bool]] = []  # (node, is_method)
-
         for node in ast.walk(self._tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-
             # Determine if this is a method inside a class body
             parent = self._parent_map.get(id(node))
             is_method = isinstance(parent, ast.ClassDef)
-
             func_nodes.append((node, is_method))
-
         for func_node, is_method in func_nodes:
             assert isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef))
             name = func_node.name
-
             # Always skip ``main``
             if name == "main":
                 continue
-
             # Skip decorated functions/methods — decorators can register them
             if func_node.decorator_list:
                 continue
-
             # Skip dunder methods
             if name.startswith("__") and name.endswith("__"):
                 continue
-
             # Skip names referenced elsewhere
             if name in self._used_names or name in self._all_names:
                 continue
-
             # For methods, skip common interface names that are expected by
             # frameworks / protocols but may not be explicitly called in the
             # same file (setUp, tearDown, etc.).
             if is_method and name.startswith("_") and not name.startswith("__"):
                 # Private methods are fair game for a warning
                 pass
-
             # Functions inside ``if __name__ == "__main__":`` are entry-points
             if self._is_inside_name_main_block(func_node):
                 continue
-
             kind = "method" if is_method else "function"
             warnings.append(Warning(
                 category="unused_function",
@@ -456,7 +407,6 @@ class SourceAnalyzer:
                 lineno=func_node.lineno,
                 message=f"\u26a0 Unused {kind} '{name}()' at line {func_node.lineno}",
             ))
-
         return warnings
 
     def _is_inside_name_main_block(self, node: ast.AST) -> bool:
@@ -477,21 +427,17 @@ class SourceAnalyzer:
         return False
 
     # ── Vague names ───────────────────────────────────────────────────────
-
     def _find_vague_names(self) -> List[Warning]:
         """Detect vague or single-letter variable names."""
         warnings: List[Warning] = []
         assigned = self._collect_assigned_names()
         seen: Set[Tuple[str, int]] = set()
-
         for name, lineno in assigned:
             if (name, lineno) in seen:
                 continue
             seen.add((name, lineno))
-
             if self._is_in_comprehension_or_lambda(name, lineno):
                 continue
-
             if name.lower() in VAGUE_NAMES:
                 warnings.append(Warning(
                     category="vague_name",
@@ -499,7 +445,6 @@ class SourceAnalyzer:
                     lineno=lineno,
                     message=f"\u26a0 Vague variable name '{name}' at line {lineno}",
                 ))
-
         return warnings
 
     def _is_in_comprehension_or_lambda(self, name: str, lineno: int) -> bool:
@@ -529,7 +474,6 @@ class SourceAnalyzer:
         return False
 
     # ── Shadowed builtins (new Tier 2 rule) ───────────────────────────────
-
     def _find_shadowed_builtins(self) -> List[Warning]:
         """Detect assignments that shadow Python built-in names.
 
@@ -546,7 +490,6 @@ class SourceAnalyzer:
         warnings: List[Warning] = []
         assigned = self._collect_assigned_names()
         seen: Set[Tuple[str, int]] = set()
-
         for name, lineno in assigned:
             if (name, lineno) in seen:
                 continue
@@ -558,11 +501,9 @@ class SourceAnalyzer:
                     lineno=lineno,
                     message=f"\u26a0 Variable '{name}' shadows a built-in at line {lineno}",
                 ))
-
         return warnings
 
     # ── Helpers ────────────────────────────────────────────────────────────
-
     def _get_line_text(self, lineno: int) -> str:
         """Get the original source line by 1-based line number."""
         if lineno < 1 or lineno > len(self._lines):
@@ -577,7 +518,6 @@ class SourceAnalyzer:
 
 
 # ─── SourceCleaner ────────────────────────────────────────────────────────────
-
 class SourceCleaner:
     """Applies Tier 1 auto-fixes to source lines."""
 
@@ -602,15 +542,12 @@ class SourceCleaner:
         line_replacements: Dict[int, str] = {}
         # For multiline imports we may need to remove a range of lines
         range_removals: List[Tuple[int, int]] = []  # (start_idx, end_idx) inclusive
-
         for imp in self._analysis.unused_imports:
             start_idx = imp.lineno - 1
             end_idx = imp.end_lineno - 1
             if start_idx < 0 or end_idx >= len(self._lines):
                 continue
-
             is_multiline = end_idx > start_idx
-
             if not imp.used_names:
                 # Remove the entire import (possibly spanning multiple lines)
                 if is_multiline:
@@ -626,14 +563,12 @@ class SourceCleaner:
                 # Partially clean — keep only the used names
                 module = imp.module or ""
                 new_line = f"{imp.indent}from {module} import {', '.join(imp.used_names)}"
-
                 # Preserve the line ending of the *last* line of the import
                 last_line = self._lines[end_idx]
                 if last_line.endswith("\r\n"):
                     new_line += "\r\n"
                 elif last_line.endswith("\n"):
                     new_line += "\n"
-
                 if is_multiline:
                     # Replace start line, remove the rest
                     line_replacements[start_idx] = new_line
@@ -641,19 +576,16 @@ class SourceCleaner:
                         lines_to_remove.add(idx)
                 else:
                     line_replacements[start_idx] = new_line
-
                 kept = ", ".join(f"'{n}'" for n in imp.used_names)
                 self._import_details.append(ImportDetail(
                     lineno=imp.lineno,
-                    text=f"{imp.original_text.strip()}  (partially cleaned: kept {kept})",
+                    text=f"{imp.original_text.strip()} (partially cleaned: kept {kept})",
                 ))
                 self._stats.unused_imports_removed += len(imp.unused_names)
-
         # Expand range removals into individual line indices
         for start_idx, end_idx in range_removals:
             for idx in range(start_idx, end_idx + 1):
                 lines_to_remove.add(idx)
-
         new_lines: List[str] = []
         for idx, line in enumerate(self._lines):
             if idx in lines_to_remove:
@@ -662,38 +594,31 @@ class SourceCleaner:
                 new_lines.append(line_replacements[idx])
             else:
                 new_lines.append(line)
-
         self._lines = new_lines
 
     def _remove_duplicate_lines(self) -> None:
         """Remove consecutive exact duplicate non-blank lines."""
         if not self._lines:
             return
-
         result: List[str] = [self._lines[0]]
         for i in range(1, len(self._lines)):
             current = self._lines[i]
             previous = self._lines[i - 1]
-
             # Never collapse blank lines here — that's handled by
             # ``_reduce_blank_lines``.
             if current.strip() == "":
                 result.append(current)
                 continue
-
             if current == previous:
                 self._stats.duplicate_lines_removed += 1
                 continue
-
             result.append(current)
-
         self._lines = result
 
     def _reduce_blank_lines(self) -> None:
         """Cap consecutive blank lines at MAX_CONSECUTIVE_BLANKS."""
         result: List[str] = []
         consecutive = 0
-
         for line in self._lines:
             if line.strip() == "":
                 consecutive += 1
@@ -704,7 +629,6 @@ class SourceCleaner:
             else:
                 consecutive = 0
                 result.append(line)
-
         self._lines = result
 
     def _ensure_trailing_newline(self) -> None:
@@ -717,7 +641,6 @@ class SourceCleaner:
 
 
 # ─── Report Printer ──────────────────────────────────────────────────────────
-
 class ReportPrinter:
     """Prints the structured PyStreamliner report."""
 
@@ -753,62 +676,54 @@ class ReportPrinter:
         unused_funcs = [w for w in self._warnings if w.category == "unused_function"]
         vague_names = [w for w in self._warnings if w.category == "vague_name"]
         shadowed = [w for w in self._warnings if w.category == "shadowed_builtin"]
-
         print()
         print(self._c(CYAN, self.BORDER_DOUBLE))
-        print(self._c(BOLD, "  PyStreamliner Report"))
+        print(self._c(BOLD, " PyStreamliner Report"))
         print(self._c(CYAN, self.BORDER_DOUBLE))
-        print(f"  File:  {self._c(BOLD, self._filename):>44s}")
-        print(f"  Lines analyzed:  {self._lines_analyzed:>20d}")
+        print(f" File: {self._c(BOLD, self._filename):>44s}")
+        print(f" Lines analyzed: {self._lines_analyzed:>20d}")
         print()
-        print(self._c(BOLD, "  Auto-fixes applied:"))
-        print(f"    Unused imports removed:  {self._stats.unused_imports_removed:>10d}")
-        print(f"    Duplicate lines removed: {self._stats.duplicate_lines_removed:>10d}")
-        print(f"    Blank lines reduced:     {self._stats.blank_lines_reduced:>10d}")
+        print(self._c(BOLD, " Auto-fixes applied:"))
+        print(f" Unused imports removed: {self._stats.unused_imports_removed:>10d}")
+        print(f" Duplicate lines removed: {self._stats.duplicate_lines_removed:>10d}")
+        print(f" Blank lines reduced: {self._stats.blank_lines_reduced:>10d}")
         print()
-        print(self._c(BOLD, "  Warnings (manual review needed):"))
-        print(f"    Unused variables detected: {len(unused_vars):>8d}")
-        print(f"    Unused functions detected: {len(unused_funcs):>8d}")
-        print(f"    Vague variable names:      {len(vague_names):>8d}")
-        print(f"    Shadowed built-ins:        {len(shadowed):>8d}")
+        print(self._c(BOLD, " Warnings (manual review needed):"))
+        print(f" Unused variables detected: {len(unused_vars):>8d}")
+        print(f" Unused functions detected: {len(unused_funcs):>8d}")
+        print(f" Vague variable names: {len(vague_names):>8d}")
+        print(f" Shadowed built-ins: {len(shadowed):>8d}")
         print(self._c(CYAN, self.BORDER_SINGLE))
-
         if self._import_details:
             print()
-            print(self._c(BOLD, "  Unused imports removed:"))
+            print(self._c(BOLD, " Unused imports removed:"))
             for detail in self._import_details:
-                print(f"    \u2022 line {detail.lineno}:  {self._c(DIM, detail.text)}")
-
+                print(f" \u2022 line {detail.lineno}: {self._c(DIM, detail.text)}")
         if unused_vars:
             print()
-            print(self._c(BOLD, "  Unused variables detected:"))
+            print(self._c(BOLD, " Unused variables detected:"))
             for w in unused_vars:
-                print(f"    {self._c(YELLOW, '\u26a0')} line {w.lineno}:  {w.name}")
-
+                print(f" {self._c(YELLOW, '\u26a0')} line {w.lineno}: {w.name}")
         if unused_funcs:
             print()
-            print(self._c(BOLD, "  Unused functions detected:"))
+            print(self._c(BOLD, " Unused functions detected:"))
             for w in unused_funcs:
-                print(f"    {self._c(YELLOW, '\u26a0')} line {w.lineno}:  {w.name}()")
-
+                print(f" {self._c(YELLOW, '\u26a0')} line {w.lineno}: {w.name}()")
         if vague_names:
             print()
-            print(self._c(BOLD, "  Vague variable names:"))
+            print(self._c(BOLD, " Vague variable names:"))
             for w in vague_names:
-                print(f"    {self._c(YELLOW, '\u26a0')} line {w.lineno}:  {w.name}")
-
+                print(f" {self._c(YELLOW, '\u26a0')} line {w.lineno}: {w.name}")
         if shadowed:
             print()
-            print(self._c(BOLD, "  Shadowed built-in names:"))
+            print(self._c(BOLD, " Shadowed built-in names:"))
             for w in shadowed:
-                print(f"    {self._c(YELLOW, '\u26a0')} line {w.lineno}:  {w.name}")
-
+                print(f" {self._c(YELLOW, '\u26a0')} line {w.lineno}: {w.name}")
         print(self._c(CYAN, self.BORDER_DOUBLE))
         print()
 
 
 # ─── Diff Printer ─────────────────────────────────────────────────────────────
-
 def print_diff(
     original_lines: List[str],
     cleaned_lines: List[str],
@@ -826,10 +741,8 @@ def print_diff(
         tofile=f"b/{filename}",
         lineterm="",
     ))
-
     if not diff:
         return False
-
     for line in diff:
         if use_color:
             if line.startswith("+++") or line.startswith("---"):
@@ -844,12 +757,10 @@ def print_diff(
                 sys.stdout.write(f"{DIM}{line}{RESET}\n")
         else:
             sys.stdout.write(line + "\n")
-
     return True
 
 
 # ─── CLI Argument Parsing ─────────────────────────────────────────────────────
-
 def _build_argument_parser() -> argparse.ArgumentParser:
     """Construct and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -890,58 +801,45 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "-n", "--no-color",
         action="store_true",
         default=False,
-        help="Strip ANSI character codes for clean log piping."
+        help="Strip ANSI character codes for clean log piping.",
     )
     parser.add_argument(
         "-w", "--warn-only",
         action="store_true",
         default=False,
-        help="Run strictly as a passive scanner. Print issues and exit without modifying any files."
+        help="Run strictly as a passive scanner. Print issues and exit without modifying any files.",
     )
     return parser
 
 
-
-
-
-
 # ─── Main Entry Point ─────────────────────────────────────────────────────────
-
 def main() -> int:
-    """CLI entry point.  Returns an exit code (0 = success, 1 = error)."""
+    """CLI entry point. Returns an exit code (0 = success, 1 = error)."""
     parser = _build_argument_parser()
     args = parser.parse_args()
-
     filepath = Path(args.file)
     use_color: bool = not args.no_color
-
     if not filepath.exists():
         sys.stderr.write(f"Error: file not found: {filepath}\n")
         return 1
-
     if not filepath.is_file():
         sys.stderr.write(f"Error: not a regular file: {filepath}\n")
         return 1
-
     try:
         source = filepath.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         sys.stderr.write(f"Error reading {filepath}: {exc}\n")
         return 1
-
     # ── Parse check ───────────────────────────────────────────────────────
     try:
         ast.parse(source, filename=str(filepath))
     except SyntaxError as exc:
         sys.stderr.write(f"Syntax error in {filepath}: {exc}\n")
         return 1
-
     original_lines = source.splitlines(True)
-
     # ── Analysis ──────────────────────────────────────────────────────────
     analyzer = SourceAnalyzer(source, str(filepath))
     analysis = analyzer.analyze()
-
     # ── Cleaning ──────────────────────────────────────────────────────────
     if args.warn_only:
         cleaned_lines = list(original_lines)
@@ -950,7 +848,6 @@ def main() -> int:
     else:
         cleaner = SourceCleaner(original_lines, analysis)
         cleaned_lines, stats, import_details = cleaner.clean()
-
     # ── Report ────────────────────────────────────────────────────────────
     printer = ReportPrinter(
         filename=str(filepath),
@@ -961,7 +858,6 @@ def main() -> int:
         use_color=use_color,
     )
     printer.print_report()
-
     # ── Diff ──────────────────────────────────────────────────────────────
     show_diff = args.diff or args.dry_run
     if show_diff:
@@ -973,17 +869,14 @@ def main() -> int:
         )
         if not had_diff:
             print("No changes." if not use_color else f"{DIM}No changes.{RESET}")
-
     # ── Write ─────────────────────────────────────────────────────────────
     if args.dry_run or args.warn_only:
         # Don't modify the file
         return 0
-
     cleaned_source = "".join(cleaned_lines)
     if cleaned_source == source:
         # Nothing changed — skip writing
         return 0
-
     # Backup if requested
     if args.backup:
         backup_path = filepath.with_suffix(filepath.suffix + ".bak")
@@ -996,13 +889,11 @@ def main() -> int:
             print(f"{DIM}Backup saved to {backup_path}{RESET}")
         else:
             print(f"Backup saved to {backup_path}")
-
     try:
         filepath.write_text(cleaned_source, encoding="utf-8")
     except OSError as exc:
         sys.stderr.write(f"Error writing {filepath}: {exc}\n")
         return 1
-
     return 0
 
 
