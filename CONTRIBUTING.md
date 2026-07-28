@@ -1,4 +1,4 @@
-# Contributing to PyStreamliner
+# Contributing to pytsreamliner
 
 Thanks for considering a contribution. Bug fixes, new detection rules, and documentation improvements are all welcome.
 
@@ -32,7 +32,7 @@ If you're unsure whether something fits, open an issue first and ask.
 ## What we don't accept
 
 - Auto-fixes that could change program behavior
-- Dependencies (PyStreamliner is intentionally zero-dependency)
+- Dependencies (pystreamliner is intentionally zero-dependency)
 - Anything that requires Python < 3.10+
 
 ---
