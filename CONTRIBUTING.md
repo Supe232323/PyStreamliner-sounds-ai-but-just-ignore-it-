@@ -1,4 +1,4 @@
-# Contributing to pytsreamliner
+# Contributing to pystreamliner
 
 Thanks for considering a contribution. Bug fixes, new detection rules, and documentation improvements are all welcome.
 
