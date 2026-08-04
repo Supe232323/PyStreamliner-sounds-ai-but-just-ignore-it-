@@ -1,23 +1,25 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pystreamliner"
 version = "1.14.0"
-description = "A script to analyze and clean Python files"
+description = "A conservative, zero-dependency Python source code cleaner"
 readme = "README.md"
 requires-python = ">=3.13"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Supe232323"}
+]
 
 [project.scripts]
 pystreamliner = "streamliner:main"
 
-[tool.setuptools.packages.find]
-include = ["streamliner*"]
-exclude = ["test_messy*", "tests*"]
-
 [project.urls]
-Homepage = "https://github.com"
-Repository = "https://github.com"
-Documentation = "https://github.com/wiki"
+Homepage = "https://github.com/Supe232323/pystreamliner"
+Repository = "https://github.com/Supe232323/pystreamliner"
+Issues = "https://github.com/Supe232323/pystreamliner/issues"
 
+[tool.setuptools]
+py-modules = ["streamliner"]
