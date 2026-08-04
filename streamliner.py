@@ -12,6 +12,7 @@ import argparse
 import ast
 import dataclasses
 import difflib
+import json
 import re
 import shutil
 import sys
@@ -28,6 +29,8 @@ DIM = "\033[2m"
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 MAX_CONSECUTIVE_BLANKS = 2
+MAX_CONSECUTIVE_BLANKS_AGGRESSIVE = 1
+
 VAGUE_NAMES: frozenset[str] = frozenset({
     "x", "y", "z", "temp", "tmp", "foo", "bar", "baz",
     "a", "b", "c", "d", "e", "f",
@@ -36,7 +39,6 @@ VAGUE_NAMES: frozenset[str] = frozenset({
 # ─── Data Structures ─────────────────────────────────────────────────────────
 @dataclasses.dataclass
 class ImportFinding:
-    """A single import statement with usage information."""
     lineno: int
     end_lineno: int
     original_text: str
@@ -49,7 +51,6 @@ class ImportFinding:
 
 @dataclasses.dataclass
 class Warning:
-    """A Tier 2 warning for manual review."""
     category: str
     name: str
     lineno: int
@@ -57,43 +58,73 @@ class Warning:
 
 @dataclasses.dataclass
 class AnalysisResult:
-    """Complete analysis output."""
     unused_imports: list[ImportFinding]
     warnings: list[Warning]
     all_names_in_all: set[str]
 
 @dataclasses.dataclass
 class CleaningStats:
-    """Counts of auto-fix actions taken."""
     unused_imports_removed: int = 0
     duplicate_lines_removed: int = 0
     blank_lines_reduced: int = 0
 
 @dataclasses.dataclass
 class ImportDetail:
-    """Detail line for the report."""
     lineno: int
     text: str
 
-# ─── AST Parent Map Builder ──────────────────────────────────────────────────
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 def _build_parent_map(tree: ast.AST) -> dict[int, ast.AST]:
-    """Build a mapping from id(child) -> parent node for the entire AST.
-    This allows reliable parent-tracking instead of fragile line-number
-    matching when determining whether a node lives inside a comprehension,
-    lambda, or other construct.
-    """
     parent_map: dict[int, ast.AST] = {}
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
             parent_map[id(child)] = node
     return parent_map
 
+def _parse_exclude(exclude: str | None) -> set[int]:
+    if not exclude:
+        return set()
+    lines: set[int] = set()
+    for part in exclude.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                start_s, end_s = part.split("-", 1)
+                start, end = int(start_s), int(end_s)
+                lines.update(range(start, end + 1))
+            except ValueError:
+                continue
+        else:
+            try:
+                lines.add(int(part))
+            except ValueError:
+                continue
+    return lines
+
+def _filter_warnings(
+    warnings: list[Warning],
+    select: str | None,
+    ignore: str | None,
+    excluded_lines: set[int],
+) -> list[Warning]:
+    selected = {s.strip() for s in select.split(",")} if select else None
+    ignored = {i.strip() for i in ignore.split(",")} if ignore else set()
+    result: list[Warning] = []
+    for w in warnings:
+        if w.lineno in excluded_lines:
+            continue
+        if selected is not None and w.category not in selected:
+            continue
+        if w.category in ignored:
+            continue
+        result.append(w)
+    return result
+
 # ─── SourceAnalyzer ───────────────────────────────────────────────────────────
 class SourceAnalyzer:
-    """Analyzes Python source code for issues without modifying it."""
-
     def __init__(self, source: str, filename: str) -> None:
-        """Initialize the analyzer with source text and a filename for diagnostics."""
         self._source = source
         self._filename = filename
         self._tree = ast.parse(source, filename=filename)
@@ -101,11 +132,8 @@ class SourceAnalyzer:
         self._used_names: set[str] | None = None
         self._all_names: set[str] = set()
         self._parent_map: dict[int, ast.AST] = _build_parent_map(self._tree)
-        self._type_checking_import_names: set[str] = set()
 
     def analyze(self) -> AnalysisResult:
-        """Run all analysis passes and return combined results."""
-        self._collect_type_checking_imports()
         self._used_names = self._collect_all_used_names()
         self._collect_all_list_names()
         unused_imports = self._find_unused_imports()
@@ -120,142 +148,91 @@ class SourceAnalyzer:
             all_names_in_all=self._all_names,
         )
 
-    # ── Name collection helpers ───────────────────────────────────────────
-    def _collect_type_checking_imports(self) -> None:
-        """Identify import names inside ``if TYPE_CHECKING:`` blocks.
-        These imports exist only for static analysis tooling and must never be
-        flagged as unused at runtime.
-        """
-        for node in ast.walk(self._tree):
-            if not isinstance(node, ast.If):
-                continue
-            # Match both ``if TYPE_CHECKING:`` and ``if typing.TYPE_CHECKING:``
-            test = node.test
-            is_tc = False
-            if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
-                is_tc = True
-            elif isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING":
-                is_tc = True
-            if not is_tc:
-                continue
-            for child in ast.walk(node):
-                if isinstance(child, ast.Import):
-                    for alias in child.names:
-                        bound = alias.asname if alias.asname else alias.name.split(".")[0]
-                        self._type_checking_import_names.add(bound)
-                elif isinstance(child, ast.ImportFrom):
-                    for alias in child.names:
-                        bound = alias.asname if alias.asname else alias.name
-                        self._type_checking_import_names.add(bound)
-
     def _collect_all_used_names(self) -> set[str]:
-        """Collect every name referenced in Load context across the entire AST.
-        Also collects names used as type annotations (string or otherwise) so
-        that variables used exclusively in type hints are not false-positived.
-        """
         names: set[str] = set()
         for node in ast.walk(self._tree):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                 names.add(node.id)
-            elif isinstance(node, ast.Attribute):
-                val = node.value
-                if isinstance(val, ast.Name):
-                    names.add(val.id)
-            # Capture string-form annotations (e.g. ``x: "SomeType"``).
+            elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                names.add(node.value.id)
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                # Only consider it a name reference if it looks like a valid
-                # Python identifier (avoids matching arbitrary strings).
                 candidate = node.value.strip()
                 if candidate.isidentifier():
                     names.add(candidate)
         return names
 
     def _collect_all_list_names(self) -> None:
-        """Collect string literals inside __all__ assignments."""
         for node in ast.walk(self._tree):
             if not isinstance(node, ast.Assign):
                 continue
             for target in node.targets:
-                if not (isinstance(target, ast.Name) and target.id == "__all__"):
-                    continue
-                if not isinstance(node.value, (ast.List, ast.Tuple)):
-                    continue
-                for elt in node.value.elts:
-                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                        self._all_names.add(elt.value)
+                if isinstance(target, ast.Name) and target.id == "__all__":
+                    if isinstance(node.value, (ast.List, ast.Tuple)):
+                        for elt in node.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                self._all_names.add(elt.value)
 
-    # ── Unused imports ────────────────────────────────────────────────────
     def _find_unused_imports(self) -> list[ImportFinding]:
-        """Detect imports whose bound names are never referenced."""
         assert self._used_names is not None
         findings: list[ImportFinding] = []
         for node in ast.iter_child_nodes(self._tree):
-            # Skip imports guarded by ``if TYPE_CHECKING:``
-            if self._is_inside_type_checking_block(node):
-                continue
             if isinstance(node, ast.Import):
-                findings.extend(self._check_import(node))
+                result = self._check_import(node)
+                if result is not None:
+                    findings.append(result)
             elif isinstance(node, ast.ImportFrom):
                 result = self._check_from_import(node)
                 if result is not None:
                     findings.append(result)
         return findings
 
-    def _is_inside_type_checking_block(self, target: ast.AST) -> bool:
-        """Return True if *target* lives inside an ``if TYPE_CHECKING:`` guard."""
-        for node in ast.walk(self._tree):
-            if not isinstance(node, ast.If):
-                continue
-            test = node.test
-            is_tc = False
-            if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
-                is_tc = True
-            elif isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING":
-                is_tc = True
-            if not is_tc:
-                continue
-            for child in ast.walk(node):
-                if child is target:
-                    return True
-        return False
-
-    def _check_import(self, node: ast.Import) -> list[ImportFinding]:
-        """Check a plain 'import x' statement."""
+    def _check_import(self, node: ast.Import) -> ImportFinding | None:
         assert self._used_names is not None
-        findings: list[ImportFinding] = []
         line_text = self._get_line_text(node.lineno)
         indent = self._get_indent(line_text)
         end_lineno = getattr(node, "end_lineno", node.lineno) or node.lineno
+        if end_lineno > node.lineno:
+            original_text = "".join(self._lines[node.lineno - 1:end_lineno]).rstrip()
+        else:
+            original_text = line_text.rstrip()
+
+        bound_names: list[str] = []
+        unused: list[str] = []
+        used: list[str] = []
         for alias in node.names:
             bound = alias.asname if alias.asname else alias.name.split(".")[0]
+            bound_names.append(bound)
             if bound in self._used_names or bound in self._all_names:
-                continue
-            findings.append(ImportFinding(
-                lineno=node.lineno,
-                end_lineno=end_lineno,
-                original_text=line_text.rstrip(),
-                bound_names=[bound],
-                unused_names=[bound],
-                used_names=[],
-                is_from_import=False,
-                indent=indent,
-            ))
-        return findings
+                if alias.asname:
+                    used.append(f"{alias.name} as {alias.asname}")
+                else:
+                    used.append(alias.name)
+            else:
+                unused.append(bound)
+        if not unused:
+            return None
+        return ImportFinding(
+            lineno=node.lineno,
+            end_lineno=end_lineno,
+            original_text=original_text,
+            bound_names=bound_names,
+            unused_names=unused,
+            used_names=used,
+            is_from_import=False,
+            indent=indent,
+        )
 
     def _check_from_import(self, node: ast.ImportFrom) -> ImportFinding | None:
-        """Check a 'from x import y' statement (including multiline)."""
         assert self._used_names is not None
-        if node.module and node.module == "__future__":
+        if node.module == "__future__":
             return None
         if any(alias.name == "*" for alias in node.names):
             return None
         line_text = self._get_line_text(node.lineno)
         indent = self._get_indent(line_text)
         end_lineno = getattr(node, "end_lineno", node.lineno) or node.lineno
-        # Build the full original text for multiline imports
         if end_lineno > node.lineno:
-            original_lines = self._lines[node.lineno - 1:end_lineno]
-            original_text = "".join(original_lines).rstrip()
+            original_text = "".join(self._lines[node.lineno - 1:end_lineno]).rstrip()
         else:
             original_text = line_text.rstrip()
         bound_names: list[str] = []
@@ -282,23 +259,13 @@ class SourceAnalyzer:
             module=node.module,
         )
 
-    # ── Unused variables ──────────────────────────────────────────────────
     def _find_unused_variables(self) -> list[Warning]:
-        """Detect variables assigned but never read.
-        Skips variables that appear only in type annotations (AnnAssign with
-        no value) because those are declarations, not real assignments.
-        """
         assert self._used_names is not None
         warnings: list[Warning] = []
-        assigned = self._collect_assigned_names()
-        for name, lineno in assigned:
-            if name == "_":
+        for name, lineno in self._collect_assigned_names():
+            if name == "_" or (name.startswith("__") and name.endswith("__")):
                 continue
-            if name.startswith("__") and name.endswith("__"):
-                continue
-            if name in self._all_names:
-                continue
-            if name in self._used_names:
+            if name in self._all_names or name in self._used_names:
                 continue
             warnings.append(Warning(
                 category="unused_variable",
@@ -309,21 +276,13 @@ class SourceAnalyzer:
         return warnings
 
     def _collect_assigned_names(self) -> list[tuple[str, int]]:
-        """Collect all variable assignment targets with line numbers.
-        Annotation-only declarations (``x: int`` with no value) are excluded
-        because the name is not actually bound to a runtime value.
-        """
         assigned: list[tuple[str, int]] = []
         for node in ast.walk(self._tree):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     self._extract_names_from_target(target, assigned)
-            elif isinstance(node, ast.AnnAssign):
-                # Only include annotated assignments that actually have a value
-                # (``x: int = 5``). Pure annotations (``x: int``) are
-                # declarations, not assignments.
-                if node.value is not None and node.target is not None:
-                    self._extract_names_from_target(node.target, assigned)
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                self._extract_names_from_target(node.target, assigned)
             elif isinstance(node, ast.For):
                 self._extract_names_from_target(node.target, assigned)
             elif isinstance(node, (ast.With, ast.AsyncWith)):
@@ -334,92 +293,53 @@ class SourceAnalyzer:
                 self._extract_names_from_target(node.target, assigned)
         return assigned
 
-    def _extract_names_from_target(
-        self,
-        target: ast.expr,
-        result: list[tuple[str, int]],
-    ) -> None:
-        """Recursively extract name targets from assignment LHS."""
+    def _extract_names_from_target(self, target: ast.expr, result: list[tuple[str, int]]) -> None:
         if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
             result.append((target.id, target.lineno))
         elif isinstance(target, (ast.Tuple, ast.List)):
             for elt in target.elts:
                 self._extract_names_from_target(elt, result)
 
-    # ── Unused functions ──────────────────────────────────────────────────
     def _find_unused_functions(self) -> list[Warning]:
-        """Detect top-level and class-level functions that are never called.
-        Class methods (except those exempted by naming convention or decorators)
-        and nested functions are now also checked.
-        """
         assert self._used_names is not None
         warnings: list[Warning] = []
-        # Collect all function / method definitions across the tree
-        func_nodes: list[tuple[ast.AST, bool]] = []  # (node, is_method)
         for node in ast.walk(self._tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            # Determine if this is a method inside a class body
-            parent = self._parent_map.get(id(node))
-            is_method = isinstance(parent, ast.ClassDef)
-            func_nodes.append((node, is_method))
-        for func_node, is_method in func_nodes:
-            assert isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            name = func_node.name
-            # Always skip ``main``
-            if name == "main":
+            name = node.name
+            if name == "main" or node.decorator_list or (name.startswith("__") and name.endswith("__")):
                 continue
-            # Skip decorated functions/methods — decorators can register them
-            if func_node.decorator_list:
-                continue
-            # Skip dunder methods
-            if name.startswith("__") and name.endswith("__"):
-                continue
-            # Skip names referenced elsewhere
             if name in self._used_names or name in self._all_names:
                 continue
-            # For methods, skip common interface names that are expected by
-            # frameworks / protocols but may not be explicitly called in the
-            # same file (setUp, tearDown, etc.).
-            if is_method and name.startswith("_") and not name.startswith("__"):
-                # Private methods are fair game for a warning
-                pass
-            # Functions inside ``if __name__ == "__main__":`` are entry-points
-            if self._is_inside_name_main_block(func_node):
+            if self._is_inside_name_main_block(node):
                 continue
-            kind = "method" if is_method else "function"
+            parent = self._parent_map.get(id(node))
+            kind = "method" if isinstance(parent, ast.ClassDef) else "function"
             warnings.append(Warning(
                 category="unused_function",
                 name=name,
-                lineno=func_node.lineno,
-                message=f"⚠ Unused {kind} '{name}()' at line {func_node.lineno}",
+                lineno=node.lineno,
+                message=f"⚠ Unused {kind} '{name}()' at line {node.lineno}",
             ))
         return warnings
 
     def _is_inside_name_main_block(self, node: ast.AST) -> bool:
-        """Check if a node is inside an 'if __name__ == ...' block."""
-        for top_node in ast.iter_child_nodes(self._tree):
-            if not isinstance(top_node, ast.If):
+        for top in ast.iter_child_nodes(self._tree):
+            if not isinstance(top, ast.If):
                 continue
-            test = top_node.test
-            if not isinstance(test, ast.Compare):
-                continue
-            if not isinstance(test.left, ast.Name):
-                continue
-            if test.left.id != "__name__":
-                continue
-            for child in ast.walk(top_node):
-                if child is node:
-                    return True
+            test = top.test
+            if (isinstance(test, ast.Compare)
+                    and isinstance(test.left, ast.Name)
+                    and test.left.id == "__name__"):
+                for child in ast.walk(top):
+                    if child is node:
+                        return True
         return False
 
-    # ── Vague names ───────────────────────────────────────────────────────
     def _find_vague_names(self) -> list[Warning]:
-        """Detect vague or single-letter variable names."""
         warnings: list[Warning] = []
-        assigned = self._collect_assigned_names()
         seen: set[tuple[str, int]] = set()
-        for name, lineno in assigned:
+        for name, lineno in self._collect_assigned_names():
             if (name, lineno) in seen:
                 continue
             seen.add((name, lineno))
@@ -435,37 +355,24 @@ class SourceAnalyzer:
         return warnings
 
     def _is_in_comprehension_or_lambda(self, name: str, lineno: int) -> bool:
-        """Check whether an assignment target lives inside a comprehension or lambda.
-        Uses the AST parent map for reliable detection instead of fragile
-        line-number matching.
-        """
-        comp_types = (ast.ListComp, ast.SetComp, ast.DictComp,
-                      ast.GeneratorExp, ast.Lambda)
+        comp_types = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda)
         for node in ast.walk(self._tree):
-            if not isinstance(node, ast.Name):
-                continue
-            if node.id != name or node.lineno != lineno:
-                continue
-            if not isinstance(node.ctx, ast.Store):
-                continue
-            # Walk up the parent chain looking for a comprehension / lambda
-            current: ast.AST = node
-            while True:
-                parent = self._parent_map.get(id(current))
-                if parent is None:
-                    break
-                if isinstance(parent, comp_types):
-                    return True
-                current = parent
+            if (isinstance(node, ast.Name)
+                    and node.id == name
+                    and node.lineno == lineno
+                    and isinstance(node.ctx, ast.Store)):
+                current: ast.AST = node
+                while True:
+                    parent = self._parent_map.get(id(current))
+                    if parent is None:
+                        break
+                    if isinstance(parent, comp_types):
+                        return True
+                    current = parent
         return False
 
-    # ── Shadowed builtins (new Tier 2 rule) ───────────────────────────────
     def _find_shadowed_builtins(self) -> list[Warning]:
-        """Detect assignments that shadow Python built-in names.
-        Only a conservative subset of commonly-shadowed builtins is checked to
-        avoid excessive noise.
-        """
-        SHADOWED_BUILTINS: frozenset[str] = frozenset({
+        SHADOWED = frozenset({
             "id", "type", "list", "dict", "set", "tuple", "str", "int",
             "float", "bool", "input", "open", "range", "len", "map",
             "filter", "sum", "min", "max", "next", "iter", "hash",
@@ -473,13 +380,12 @@ class SourceAnalyzer:
             "property", "staticmethod", "classmethod", "super",
         })
         warnings: list[Warning] = []
-        assigned = self._collect_assigned_names()
         seen: set[tuple[str, int]] = set()
-        for name, lineno in assigned:
+        for name, lineno in self._collect_assigned_names():
             if (name, lineno) in seen:
                 continue
             seen.add((name, lineno))
-            if name in SHADOWED_BUILTINS:
+            if name in SHADOWED:
                 warnings.append(Warning(
                     category="shadowed_builtin",
                     name=name,
@@ -488,32 +394,33 @@ class SourceAnalyzer:
                 ))
         return warnings
 
-    # ── Helpers ────────────────────────────────────────────────────────────
     def _get_line_text(self, lineno: int) -> str:
-        """Get the original source line by 1-based line number."""
-        if lineno < 1 or lineno > len(self._lines):
-            return ""
-        return self._lines[lineno - 1]
+        if 1 <= lineno <= len(self._lines):
+            return self._lines[lineno - 1]
+        return ""
 
     @staticmethod
     def _get_indent(line: str) -> str:
-        """Extract leading whitespace from a line."""
         match = re.match(r"^(\s*)", line)
         return match.group(1) if match else ""
 
 # ─── SourceCleaner ────────────────────────────────────────────────────────────
 class SourceCleaner:
-    """Applies Tier 1 auto-fixes to source lines."""
-
-    def __init__(self, lines: list[str], analysis: AnalysisResult) -> None:
-        """Initialize the cleaner with source lines and analysis results."""
+    def __init__(
+        self,
+        lines: list[str],
+        analysis: AnalysisResult,
+        aggressive: bool = False,
+        excluded_lines: set[int] | None = None,
+    ) -> None:
         self._lines = list(lines)
         self._analysis = analysis
         self._stats = CleaningStats()
         self._import_details: list[ImportDetail] = []
+        self._max_blanks = MAX_CONSECUTIVE_BLANKS_AGGRESSIVE if aggressive else MAX_CONSECUTIVE_BLANKS
+        self._excluded = excluded_lines or set()
 
     def clean(self) -> tuple[list[str], CleaningStats, list[ImportDetail]]:
-        """Apply all auto-fixes and return cleaned lines with stats."""
         self._remove_unused_imports()
         self._remove_duplicate_lines()
         self._reduce_blank_lines()
@@ -521,40 +428,39 @@ class SourceCleaner:
         return self._lines, self._stats, self._import_details
 
     def _remove_unused_imports(self) -> None:
-        """Remove or trim unused import statements (including multiline)."""
         lines_to_remove: set[int] = set()
         line_replacements: dict[int, str] = {}
-        # For multiline imports we may need to remove a range of lines
-        range_removals: list[tuple[int, int]] = []  # (start_idx, end_idx) inclusive
+        range_removals: list[tuple[int, int]] = []
+
         for imp in self._analysis.unused_imports:
+            if imp.lineno in self._excluded:
+                continue
             start_idx = imp.lineno - 1
             end_idx = imp.end_lineno - 1
             if start_idx < 0 or end_idx >= len(self._lines):
                 continue
             is_multiline = end_idx > start_idx
             if not imp.used_names:
-                # Remove the entire import (possibly spanning multiple lines)
+                # Fully unused → delete the whole statement
                 if is_multiline:
                     range_removals.append((start_idx, end_idx))
                 else:
                     lines_to_remove.add(start_idx)
-                self._import_details.append(ImportDetail(
-                    lineno=imp.lineno,
-                    text=imp.original_text.strip(),
-                ))
+                self._import_details.append(ImportDetail(lineno=imp.lineno, text=imp.original_text.strip()))
                 self._stats.unused_imports_removed += len(imp.unused_names)
-            elif imp.is_from_import:
-                # Partially clean — keep only the used names
-                module = imp.module or ""
-                new_line = f"{imp.indent}from {module} import {', '.join(imp.used_names)}"
-                # Preserve the line ending of the *last* line of the import
-                last_line = self._lines[end_idx]
-                if last_line.endswith("\r\n"):
+            else:
+                # Partial cleanup (works for both plain import and from-import)
+                if imp.is_from_import:
+                    module = imp.module or ""
+                    new_line = f"{imp.indent}from {module} import {', '.join(imp.used_names)}"
+                else:
+                    new_line = f"{imp.indent}import {', '.join(imp.used_names)}"
+                last = self._lines[end_idx]
+                if last.endswith("\r\n"):
                     new_line += "\r\n"
-                elif last_line.endswith("\n"):
+                elif last.endswith("\n"):
                     new_line += "\n"
                 if is_multiline:
-                    # Replace start line, remove the rest
                     line_replacements[start_idx] = new_line
                     for idx in range(start_idx + 1, end_idx + 1):
                         lines_to_remove.add(idx)
@@ -566,47 +472,40 @@ class SourceCleaner:
                     text=f"{imp.original_text.strip()} (partially cleaned: kept {kept})",
                 ))
                 self._stats.unused_imports_removed += len(imp.unused_names)
-        # Expand range removals into individual line indices
-        for start_idx, end_idx in range_removals:
-            for idx in range(start_idx, end_idx + 1):
+
+        for start, end in range_removals:
+            for idx in range(start, end + 1):
                 lines_to_remove.add(idx)
+
         new_lines: list[str] = []
         for idx, line in enumerate(self._lines):
             if idx in lines_to_remove:
                 continue
-            if idx in line_replacements:
-                new_lines.append(line_replacements[idx])
-            else:
-                new_lines.append(line)
+            new_lines.append(line_replacements.get(idx, line))
         self._lines = new_lines
 
     def _remove_duplicate_lines(self) -> None:
-        """Remove consecutive exact duplicate non-blank lines."""
         if not self._lines:
             return
         result: list[str] = [self._lines[0]]
         for i in range(1, len(self._lines)):
             current = self._lines[i]
-            previous = self._lines[i - 1]
-            # Never collapse blank lines here — that's handled by
-            # ``_reduce_blank_lines``.
             if current.strip() == "":
                 result.append(current)
                 continue
-            if current == previous:
+            if current == self._lines[i - 1]:
                 self._stats.duplicate_lines_removed += 1
                 continue
             result.append(current)
         self._lines = result
 
     def _reduce_blank_lines(self) -> None:
-        """Cap consecutive blank lines at MAX_CONSECUTIVE_BLANKS."""
         result: list[str] = []
         consecutive = 0
         for line in self._lines:
             if line.strip() == "":
                 consecutive += 1
-                if consecutive <= MAX_CONSECUTIVE_BLANKS:
+                if consecutive <= self._max_blanks:
                     result.append(line)
                 else:
                     self._stats.blank_lines_reduced += 1
@@ -616,17 +515,11 @@ class SourceCleaner:
         self._lines = result
 
     def _ensure_trailing_newline(self) -> None:
-        """Ensure the file ends with exactly one newline."""
-        if not self._lines:
-            return
-        last = self._lines[-1]
-        if not last.endswith("\n"):
-            self._lines[-1] = last + "\n"
+        if self._lines and not self._lines[-1].endswith("\n"):
+            self._lines[-1] += "\n"
 
 # ─── Report Printer ──────────────────────────────────────────────────────────
 class ReportPrinter:
-    """Prints the structured PyStreamliner report."""
-
     BORDER_DOUBLE = "═" * 38
     BORDER_SINGLE = "─" * 38
 
@@ -639,7 +532,6 @@ class ReportPrinter:
         import_details: list[ImportDetail],
         use_color: bool = True,
     ) -> None:
-        """Initialize the report printer."""
         self._filename = filename
         self._lines_analyzed = lines_analyzed
         self._stats = stats
@@ -648,13 +540,9 @@ class ReportPrinter:
         self._use_color = use_color
 
     def _c(self, code: str, text: str) -> str:
-        """Wrap *text* in an ANSI color code if color output is enabled."""
-        if not self._use_color:
-            return text
-        return f"{code}{text}{RESET}"
+        return f"{code}{text}{RESET}" if self._use_color else text
 
     def print_report(self) -> None:
-        """Print the full structured report to stdout."""
         unused_vars = [w for w in self._warnings if w.category == "unused_variable"]
         unused_funcs = [w for w in self._warnings if w.category == "unused_function"]
         vague_names = [w for w in self._warnings if w.category == "vague_name"]
@@ -680,8 +568,8 @@ class ReportPrinter:
         if self._import_details:
             print()
             print(self._c(BOLD, " Unused imports removed:"))
-            for detail in self._import_details:
-                print(f" • line {detail.lineno}: {self._c(DIM, detail.text)}")
+            for d in self._import_details:
+                print(f" • line {d.lineno}: {self._c(DIM, d.text)}")
         if unused_vars:
             print()
             print(self._c(BOLD, " Unused variables detected:"))
@@ -705,28 +593,21 @@ class ReportPrinter:
         print(self._c(CYAN, self.BORDER_DOUBLE))
         print()
 
-# ─── Diff Printer ─────────────────────────────────────────────────────────────
 def print_diff(
     original_lines: list[str],
     cleaned_lines: list[str],
     filename: str = "source",
     use_color: bool = True,
 ) -> bool:
-    """Print a color-coded unified diff between original and cleaned source.
-    Returns ``True`` if there were any differences, ``False`` otherwise.
-    """
     diff = list(difflib.unified_diff(
-        original_lines,
-        cleaned_lines,
-        fromfile=f"a/{filename}",
-        tofile=f"b/{filename}",
-        lineterm="",
+        original_lines, cleaned_lines,
+        fromfile=f"a/{filename}", tofile=f"b/{filename}", lineterm="",
     ))
     if not diff:
         return False
     for line in diff:
         if use_color:
-            if line.startswith("+++") or line.startswith("---"):
+            if line.startswith(("+++", "---")):
                 sys.stdout.write(f"{BOLD}{line}{RESET}\n")
             elif line.startswith("@@"):
                 sys.stdout.write(f"{CYAN}{line}{RESET}\n")
@@ -740,139 +621,171 @@ def print_diff(
             sys.stdout.write(line + "\n")
     return True
 
-# ─── CLI Argument Parsing ─────────────────────────────────────────────────────
+# ─── CLI ──────────────────────────────────────────────────────────────────────
 def _build_argument_parser() -> argparse.ArgumentParser:
-    """Construct and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="pystreamliner",
         description=(
-            "PyStreamliner - A conservative, zero-dependency Python source "
-            "cleaner.\n\n"
-            "Tier 1 auto-fixes are applied in-place (unless --dry-run is "
-            "given).\n"
+            "PyStreamliner - A conservative, zero-dependency Python source cleaner.\n\n"
+            "Tier 1 auto-fixes are applied in-place (unless --dry-run is given).\n"
             "Tier 2 issues are reported as warnings for manual review."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "file",
-        type=str,
-        help="Path to the Python source file to analyze / clean.",
-    )
-    parser.add_argument(
-        "-d", "--dry-run",
-        action="store_true",
-        default=False,
-        help="Preview changes without modifying the file.",
-    )
-    parser.add_argument(
-        "-b", "--backup",
-        action="store_true",
-        default=False,
-        help="Create a .bak copy of the original file before modifying it.",
-    )
-    parser.add_argument(
-        "-v", "--diff",
-        action="store_true",
-        default=False,
-        help="Show a unified diff of the changes (implied by --dry-run).",
-    )
-    parser.add_argument(
-        "-n", "--no-color",
-        action="store_true",
-        default=False,
-        help="Strip ANSI character codes for clean log piping.",
-    )
-    parser.add_argument(
-        "-w", "--warn-only",
-        action="store_true",
-        default=False,
-        help="Run strictly as a passive scanner. Print issues and exit without modifying any files.",
-    )
+    parser.add_argument("file", nargs="?", default=None,
+                        help="Path to the Python source file. Omit when using --stdin.")
+    parser.add_argument("-d", "--dry-run", action="store_true",
+                        help="Preview changes without modifying the file.")
+    parser.add_argument("-b", "--backup", action="store_true",
+                        help="Create a .bak copy before modifying.")
+    parser.add_argument("-v", "--diff", action="store_true",
+                        help="Show a unified diff (implied by --dry-run).")
+    parser.add_argument("-n", "--no-color", action="store_true",
+                        help="Strip ANSI codes.")
+    parser.add_argument("-w", "--warn-only", action="store_true",
+                        help="Passive scanner only. No modifications.")
+    parser.add_argument("-c", "--check", action="store_true",
+                        help="Exit non-zero if changes or warnings exist (CI).")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="Suppress the structured report.")
+    parser.add_argument("--json", action="store_true",
+                        help="Emit machine-readable JSON.")
+    parser.add_argument("--fix-only", action="store_true",
+                        help="Tier 1 only. Suppress all Tier 2 warnings.")
+    parser.add_argument("--aggressive", action="store_true",
+                        help="Slightly less conservative blank-line collapsing.")
+    parser.add_argument("--stdin", action="store_true",
+                        help="Read from stdin, write cleaned source to stdout.")
+    parser.add_argument("--select", type=str, default=None,
+                        help="Comma-separated warning categories to show.")
+    parser.add_argument("--ignore", type=str, default=None,
+                        help="Comma-separated warning categories to suppress.")
+    parser.add_argument("--exclude", type=str, default=None,
+                        help="Comma-separated line numbers/ranges to skip (e.g. 10,25-40).")
     return parser
 
-# ─── Main Entry Point ─────────────────────────────────────────────────────────
 def main() -> int:
-    """CLI entry point. Returns an exit code (0 = success, 1 = error)."""
     parser = _build_argument_parser()
     args = parser.parse_args()
-    filepath = Path(args.file)
-    use_color: bool = not args.no_color
-    if not filepath.exists():
-        sys.stderr.write(f"Error: file not found: {filepath}\n")
-        return 1
-    if not filepath.is_file():
-        sys.stderr.write(f"Error: not a regular file: {filepath}\n")
-        return 1
-    try:
-        source = filepath.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        sys.stderr.write(f"Error reading {filepath}: {exc}\n")
-        return 1
-    # ── Parse check ───────────────────────────────────────────────────────
+    use_color = not args.no_color
+    excluded_lines = _parse_exclude(args.exclude)
+
+    if args.stdin:
+        source = sys.stdin.read()
+        filepath = Path("<stdin>")
+        original_lines = source.splitlines(True)
+    else:
+        if args.file is None:
+            parser.error("the following arguments are required: file (or use --stdin)")
+        filepath = Path(args.file)
+        if not filepath.exists():
+            sys.stderr.write(f"Error: file not found: {filepath}\n")
+            return 1
+        if not filepath.is_file():
+            sys.stderr.write(f"Error: not a regular file: {filepath}\n")
+            return 1
+        try:
+            source = filepath.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            sys.stderr.write(f"Error reading {filepath}: {exc}\n")
+            return 1
+        original_lines = source.splitlines(True)
+
     try:
         ast.parse(source, filename=str(filepath))
     except SyntaxError as exc:
         sys.stderr.write(f"Syntax error in {filepath}: {exc}\n")
         return 1
-    original_lines = source.splitlines(True)
-    # ── Analysis ──────────────────────────────────────────────────────────
+
     analyzer = SourceAnalyzer(source, str(filepath))
     analysis = analyzer.analyze()
-    # ── Cleaning ──────────────────────────────────────────────────────────
+
+    if args.fix_only:
+        analysis.warnings = []
+    else:
+        analysis.warnings = _filter_warnings(
+            analysis.warnings, args.select, args.ignore, excluded_lines
+        )
+
     if args.warn_only:
         cleaned_lines = list(original_lines)
         stats = CleaningStats()
         import_details: list[ImportDetail] = []
     else:
-        cleaner = SourceCleaner(original_lines, analysis)
+        cleaner = SourceCleaner(
+            original_lines, analysis,
+            aggressive=args.aggressive,
+            excluded_lines=excluded_lines,
+        )
         cleaned_lines, stats, import_details = cleaner.clean()
-    # ── Report ────────────────────────────────────────────────────────────
-    printer = ReportPrinter(
-        filename=str(filepath),
-        lines_analyzed=len(original_lines),
-        stats=stats,
-        warnings=analysis.warnings,
-        import_details=import_details,
-        use_color=use_color,
-    )
-    printer.print_report()
-    # ── Diff ──────────────────────────────────────────────────────────────
+
+    if args.json:
+        payload = {
+            "file": str(filepath),
+            "lines_analyzed": len(original_lines),
+            "stats": {
+                "unused_imports_removed": stats.unused_imports_removed,
+                "duplicate_lines_removed": stats.duplicate_lines_removed,
+                "blank_lines_reduced": stats.blank_lines_reduced,
+            },
+            "warnings": [
+                {"category": w.category, "name": w.name, "lineno": w.lineno, "message": w.message}
+                for w in analysis.warnings
+            ],
+            "import_details": [{"lineno": d.lineno, "text": d.text} for d in import_details],
+        }
+        print(json.dumps(payload, indent=2))
+    elif not args.quiet:
+        ReportPrinter(
+            filename=str(filepath),
+            lines_analyzed=len(original_lines),
+            stats=stats,
+            warnings=analysis.warnings,
+            import_details=import_details,
+            use_color=use_color,
+        ).print_report()
+
     show_diff = args.diff or args.dry_run
-    if show_diff:
+    if show_diff and not args.json:
         had_diff = print_diff(
             [l.rstrip("\n").rstrip("\r") for l in original_lines],
             [l.rstrip("\n").rstrip("\r") for l in cleaned_lines],
             filename=str(filepath),
             use_color=use_color,
         )
-        if not had_diff:
+        if not had_diff and not args.quiet:
             print("No changes." if not use_color else f"{DIM}No changes.{RESET}")
-    # ── Write ─────────────────────────────────────────────────────────────
-    if args.dry_run or args.warn_only:
-        # Don't modify the file
-        return 0
-    cleaned_source = "".join(cleaned_lines)
-    if cleaned_source == source:
-        # Nothing changed — skip writing
-        return 0
-    # Backup if requested
-    if args.backup:
-        backup_path = filepath.with_suffix(filepath.suffix + ".bak")
-        try:
-            shutil.copy2(str(filepath), str(backup_path))
-        except OSError as exc:
-            sys.stderr.write(f"Error creating backup {backup_path}: {exc}\n")
+
+    if args.stdin:
+        if not args.json:
+            sys.stdout.write("".join(cleaned_lines))
+    elif not (args.dry_run or args.warn_only):
+        cleaned_source = "".join(cleaned_lines)
+        if cleaned_source != source:
+            if args.backup:
+                backup_path = filepath.with_suffix(filepath.suffix + ".bak")
+                try:
+                    shutil.copy2(str(filepath), str(backup_path))
+                except OSError as exc:
+                    sys.stderr.write(f"Error creating backup {backup_path}: {exc}\n")
+                    return 1
+                if not args.quiet:
+                    msg = f"Backup saved to {backup_path}"
+                    print(f"{DIM}{msg}{RESET}" if use_color else msg)
+            try:
+                filepath.write_text(cleaned_source, encoding="utf-8")
+            except OSError as exc:
+                sys.stderr.write(f"Error writing {filepath}: {exc}\n")
+                return 1
+
+    if args.check:
+        has_changes = (
+            stats.unused_imports_removed
+            or stats.duplicate_lines_removed
+            or stats.blank_lines_reduced
+        )
+        if has_changes or analysis.warnings:
             return 1
-        if use_color:
-            print(f"{DIM}Backup saved to {backup_path}{RESET}")
-        else:
-            print(f"Backup saved to {backup_path}")
-    try:
-        filepath.write_text(cleaned_source, encoding="utf-8")
-    except OSError as exc:
-        sys.stderr.write(f"Error writing {filepath}: {exc}\n")
-        return 1
     return 0
 
 if __name__ == "__main__":
