@@ -33,7 +33,7 @@ If you're unsure whether something fits, open an issue first and ask.
 
 - Auto-fixes that could change program behavior
 - Dependencies (pystreamliner is intentionally zero-dependency)
-- Anything that requires Python < 3.10+
+- Anything that requires Python < 3.13+
 
 ---
 
