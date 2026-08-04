@@ -16,7 +16,6 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 # ─── ANSI Color Constants ────────────────────────────────────────────────────
 RESET = "\033[0m"
@@ -29,7 +28,7 @@ DIM = "\033[2m"
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 MAX_CONSECUTIVE_BLANKS = 2
-VAGUE_NAMES: FrozenSet[str] = frozenset({
+VAGUE_NAMES: frozenset[str] = frozenset({
     "x", "y", "z", "temp", "tmp", "foo", "bar", "baz",
     "a", "b", "c", "d", "e", "f",
 })
@@ -48,7 +47,6 @@ class ImportFinding:
     indent: str
     module: str | None = None
 
-
 @dataclasses.dataclass
 class Warning:
     """A Tier 2 warning for manual review."""
@@ -57,14 +55,12 @@ class Warning:
     lineno: int
     message: str
 
-
 @dataclasses.dataclass
 class AnalysisResult:
     """Complete analysis output."""
-    unused_imports: List[ImportFinding]
-    warnings: List[Warning]
-    all_names_in_all: Set[str]
-
+    unused_imports: list[ImportFinding]
+    warnings: list[Warning]
+    all_names_in_all: set[str]
 
 @dataclasses.dataclass
 class CleaningStats:
@@ -73,28 +69,24 @@ class CleaningStats:
     duplicate_lines_removed: int = 0
     blank_lines_reduced: int = 0
 
-
 @dataclasses.dataclass
 class ImportDetail:
     """Detail line for the report."""
     lineno: int
     text: str
 
-
 # ─── AST Parent Map Builder ──────────────────────────────────────────────────
-def _build_parent_map(tree: ast.AST) -> Dict[int, ast.AST]:
+def _build_parent_map(tree: ast.AST) -> dict[int, ast.AST]:
     """Build a mapping from id(child) -> parent node for the entire AST.
-
     This allows reliable parent-tracking instead of fragile line-number
     matching when determining whether a node lives inside a comprehension,
     lambda, or other construct.
     """
-    parent_map: Dict[int, ast.AST] = {}
+    parent_map: dict[int, ast.AST] = {}
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
             parent_map[id(child)] = node
     return parent_map
-
 
 # ─── SourceAnalyzer ───────────────────────────────────────────────────────────
 class SourceAnalyzer:
@@ -106,10 +98,10 @@ class SourceAnalyzer:
         self._filename = filename
         self._tree = ast.parse(source, filename=filename)
         self._lines = source.splitlines(True)
-        self._used_names: Optional[Set[str]] = None
-        self._all_names: Set[str] = set()
-        self._parent_map: Dict[int, ast.AST] = _build_parent_map(self._tree)
-        self._type_checking_import_names: Set[str] = set()
+        self._used_names: set[str] | None = None
+        self._all_names: set[str] = set()
+        self._parent_map: dict[int, ast.AST] = _build_parent_map(self._tree)
+        self._type_checking_import_names: set[str] = set()
 
     def analyze(self) -> AnalysisResult:
         """Run all analysis passes and return combined results."""
@@ -117,7 +109,7 @@ class SourceAnalyzer:
         self._used_names = self._collect_all_used_names()
         self._collect_all_list_names()
         unused_imports = self._find_unused_imports()
-        warnings: List[Warning] = []
+        warnings: list[Warning] = []
         warnings.extend(self._find_unused_variables())
         warnings.extend(self._find_unused_functions())
         warnings.extend(self._find_vague_names())
@@ -131,7 +123,6 @@ class SourceAnalyzer:
     # ── Name collection helpers ───────────────────────────────────────────
     def _collect_type_checking_imports(self) -> None:
         """Identify import names inside ``if TYPE_CHECKING:`` blocks.
-
         These imports exist only for static analysis tooling and must never be
         flagged as unused at runtime.
         """
@@ -157,13 +148,12 @@ class SourceAnalyzer:
                         bound = alias.asname if alias.asname else alias.name
                         self._type_checking_import_names.add(bound)
 
-    def _collect_all_used_names(self) -> Set[str]:
+    def _collect_all_used_names(self) -> set[str]:
         """Collect every name referenced in Load context across the entire AST.
-
         Also collects names used as type annotations (string or otherwise) so
         that variables used exclusively in type hints are not false-positived.
         """
-        names: Set[str] = set()
+        names: set[str] = set()
         for node in ast.walk(self._tree):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                 names.add(node.id)
@@ -195,10 +185,10 @@ class SourceAnalyzer:
                         self._all_names.add(elt.value)
 
     # ── Unused imports ────────────────────────────────────────────────────
-    def _find_unused_imports(self) -> List[ImportFinding]:
+    def _find_unused_imports(self) -> list[ImportFinding]:
         """Detect imports whose bound names are never referenced."""
         assert self._used_names is not None
-        findings: List[ImportFinding] = []
+        findings: list[ImportFinding] = []
         for node in ast.iter_child_nodes(self._tree):
             # Skip imports guarded by ``if TYPE_CHECKING:``
             if self._is_inside_type_checking_block(node):
@@ -229,10 +219,10 @@ class SourceAnalyzer:
                     return True
         return False
 
-    def _check_import(self, node: ast.Import) -> List[ImportFinding]:
+    def _check_import(self, node: ast.Import) -> list[ImportFinding]:
         """Check a plain 'import x' statement."""
         assert self._used_names is not None
-        findings: List[ImportFinding] = []
+        findings: list[ImportFinding] = []
         line_text = self._get_line_text(node.lineno)
         indent = self._get_indent(line_text)
         end_lineno = getattr(node, "end_lineno", node.lineno) or node.lineno
@@ -252,7 +242,7 @@ class SourceAnalyzer:
             ))
         return findings
 
-    def _check_from_import(self, node: ast.ImportFrom) -> Optional[ImportFinding]:
+    def _check_from_import(self, node: ast.ImportFrom) -> ImportFinding | None:
         """Check a 'from x import y' statement (including multiline)."""
         assert self._used_names is not None
         if node.module and node.module == "__future__":
@@ -268,9 +258,9 @@ class SourceAnalyzer:
             original_text = "".join(original_lines).rstrip()
         else:
             original_text = line_text.rstrip()
-        bound_names: List[str] = []
-        unused: List[str] = []
-        used: List[str] = []
+        bound_names: list[str] = []
+        unused: list[str] = []
+        used: list[str] = []
         for alias in node.names:
             bound = alias.asname if alias.asname else alias.name
             bound_names.append(bound)
@@ -293,14 +283,13 @@ class SourceAnalyzer:
         )
 
     # ── Unused variables ──────────────────────────────────────────────────
-    def _find_unused_variables(self) -> List[Warning]:
+    def _find_unused_variables(self) -> list[Warning]:
         """Detect variables assigned but never read.
-
         Skips variables that appear only in type annotations (AnnAssign with
         no value) because those are declarations, not real assignments.
         """
         assert self._used_names is not None
-        warnings: List[Warning] = []
+        warnings: list[Warning] = []
         assigned = self._collect_assigned_names()
         for name, lineno in assigned:
             if name == "_":
@@ -315,17 +304,16 @@ class SourceAnalyzer:
                 category="unused_variable",
                 name=name,
                 lineno=lineno,
-                message=f"\u26a0 Unused variable '{name}' at line {lineno}",
+                message=f"⚠ Unused variable '{name}' at line {lineno}",
             ))
         return warnings
 
-    def _collect_assigned_names(self) -> List[Tuple[str, int]]:
+    def _collect_assigned_names(self) -> list[tuple[str, int]]:
         """Collect all variable assignment targets with line numbers.
-
         Annotation-only declarations (``x: int`` with no value) are excluded
         because the name is not actually bound to a runtime value.
         """
-        assigned: List[Tuple[str, int]] = []
+        assigned: list[tuple[str, int]] = []
         for node in ast.walk(self._tree):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
@@ -349,7 +337,7 @@ class SourceAnalyzer:
     def _extract_names_from_target(
         self,
         target: ast.expr,
-        result: List[Tuple[str, int]],
+        result: list[tuple[str, int]],
     ) -> None:
         """Recursively extract name targets from assignment LHS."""
         if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
@@ -359,16 +347,15 @@ class SourceAnalyzer:
                 self._extract_names_from_target(elt, result)
 
     # ── Unused functions ──────────────────────────────────────────────────
-    def _find_unused_functions(self) -> List[Warning]:
+    def _find_unused_functions(self) -> list[Warning]:
         """Detect top-level and class-level functions that are never called.
-
         Class methods (except those exempted by naming convention or decorators)
         and nested functions are now also checked.
         """
         assert self._used_names is not None
-        warnings: List[Warning] = []
+        warnings: list[Warning] = []
         # Collect all function / method definitions across the tree
-        func_nodes: List[Tuple[ast.AST, bool]] = []  # (node, is_method)
+        func_nodes: list[tuple[ast.AST, bool]] = []  # (node, is_method)
         for node in ast.walk(self._tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -405,7 +392,7 @@ class SourceAnalyzer:
                 category="unused_function",
                 name=name,
                 lineno=func_node.lineno,
-                message=f"\u26a0 Unused {kind} '{name}()' at line {func_node.lineno}",
+                message=f"⚠ Unused {kind} '{name}()' at line {func_node.lineno}",
             ))
         return warnings
 
@@ -427,11 +414,11 @@ class SourceAnalyzer:
         return False
 
     # ── Vague names ───────────────────────────────────────────────────────
-    def _find_vague_names(self) -> List[Warning]:
+    def _find_vague_names(self) -> list[Warning]:
         """Detect vague or single-letter variable names."""
-        warnings: List[Warning] = []
+        warnings: list[Warning] = []
         assigned = self._collect_assigned_names()
-        seen: Set[Tuple[str, int]] = set()
+        seen: set[tuple[str, int]] = set()
         for name, lineno in assigned:
             if (name, lineno) in seen:
                 continue
@@ -443,13 +430,12 @@ class SourceAnalyzer:
                     category="vague_name",
                     name=name,
                     lineno=lineno,
-                    message=f"\u26a0 Vague variable name '{name}' at line {lineno}",
+                    message=f"⚠ Vague variable name '{name}' at line {lineno}",
                 ))
         return warnings
 
     def _is_in_comprehension_or_lambda(self, name: str, lineno: int) -> bool:
         """Check whether an assignment target lives inside a comprehension or lambda.
-
         Uses the AST parent map for reliable detection instead of fragile
         line-number matching.
         """
@@ -474,22 +460,21 @@ class SourceAnalyzer:
         return False
 
     # ── Shadowed builtins (new Tier 2 rule) ───────────────────────────────
-    def _find_shadowed_builtins(self) -> List[Warning]:
+    def _find_shadowed_builtins(self) -> list[Warning]:
         """Detect assignments that shadow Python built-in names.
-
         Only a conservative subset of commonly-shadowed builtins is checked to
         avoid excessive noise.
         """
-        SHADOWED_BUILTINS: FrozenSet[str] = frozenset({
+        SHADOWED_BUILTINS: frozenset[str] = frozenset({
             "id", "type", "list", "dict", "set", "tuple", "str", "int",
             "float", "bool", "input", "open", "range", "len", "map",
             "filter", "sum", "min", "max", "next", "iter", "hash",
             "format", "print", "object", "bytes", "complex", "frozenset",
             "property", "staticmethod", "classmethod", "super",
         })
-        warnings: List[Warning] = []
+        warnings: list[Warning] = []
         assigned = self._collect_assigned_names()
-        seen: Set[Tuple[str, int]] = set()
+        seen: set[tuple[str, int]] = set()
         for name, lineno in assigned:
             if (name, lineno) in seen:
                 continue
@@ -499,7 +484,7 @@ class SourceAnalyzer:
                     category="shadowed_builtin",
                     name=name,
                     lineno=lineno,
-                    message=f"\u26a0 Variable '{name}' shadows a built-in at line {lineno}",
+                    message=f"⚠ Variable '{name}' shadows a built-in at line {lineno}",
                 ))
         return warnings
 
@@ -516,19 +501,18 @@ class SourceAnalyzer:
         match = re.match(r"^(\s*)", line)
         return match.group(1) if match else ""
 
-
 # ─── SourceCleaner ────────────────────────────────────────────────────────────
 class SourceCleaner:
     """Applies Tier 1 auto-fixes to source lines."""
 
-    def __init__(self, lines: List[str], analysis: AnalysisResult) -> None:
+    def __init__(self, lines: list[str], analysis: AnalysisResult) -> None:
         """Initialize the cleaner with source lines and analysis results."""
         self._lines = list(lines)
         self._analysis = analysis
         self._stats = CleaningStats()
-        self._import_details: List[ImportDetail] = []
+        self._import_details: list[ImportDetail] = []
 
-    def clean(self) -> Tuple[List[str], CleaningStats, List[ImportDetail]]:
+    def clean(self) -> tuple[list[str], CleaningStats, list[ImportDetail]]:
         """Apply all auto-fixes and return cleaned lines with stats."""
         self._remove_unused_imports()
         self._remove_duplicate_lines()
@@ -538,10 +522,10 @@ class SourceCleaner:
 
     def _remove_unused_imports(self) -> None:
         """Remove or trim unused import statements (including multiline)."""
-        lines_to_remove: Set[int] = set()
-        line_replacements: Dict[int, str] = {}
+        lines_to_remove: set[int] = set()
+        line_replacements: dict[int, str] = {}
         # For multiline imports we may need to remove a range of lines
-        range_removals: List[Tuple[int, int]] = []  # (start_idx, end_idx) inclusive
+        range_removals: list[tuple[int, int]] = []  # (start_idx, end_idx) inclusive
         for imp in self._analysis.unused_imports:
             start_idx = imp.lineno - 1
             end_idx = imp.end_lineno - 1
@@ -586,7 +570,7 @@ class SourceCleaner:
         for start_idx, end_idx in range_removals:
             for idx in range(start_idx, end_idx + 1):
                 lines_to_remove.add(idx)
-        new_lines: List[str] = []
+        new_lines: list[str] = []
         for idx, line in enumerate(self._lines):
             if idx in lines_to_remove:
                 continue
@@ -600,7 +584,7 @@ class SourceCleaner:
         """Remove consecutive exact duplicate non-blank lines."""
         if not self._lines:
             return
-        result: List[str] = [self._lines[0]]
+        result: list[str] = [self._lines[0]]
         for i in range(1, len(self._lines)):
             current = self._lines[i]
             previous = self._lines[i - 1]
@@ -617,7 +601,7 @@ class SourceCleaner:
 
     def _reduce_blank_lines(self) -> None:
         """Cap consecutive blank lines at MAX_CONSECUTIVE_BLANKS."""
-        result: List[str] = []
+        result: list[str] = []
         consecutive = 0
         for line in self._lines:
             if line.strip() == "":
@@ -639,21 +623,20 @@ class SourceCleaner:
         if not last.endswith("\n"):
             self._lines[-1] = last + "\n"
 
-
 # ─── Report Printer ──────────────────────────────────────────────────────────
 class ReportPrinter:
     """Prints the structured PyStreamliner report."""
 
-    BORDER_DOUBLE = "\u2550" * 38
-    BORDER_SINGLE = "\u2500" * 38
+    BORDER_DOUBLE = "═" * 38
+    BORDER_SINGLE = "─" * 38
 
     def __init__(
         self,
         filename: str,
         lines_analyzed: int,
         stats: CleaningStats,
-        warnings: List[Warning],
-        import_details: List[ImportDetail],
+        warnings: list[Warning],
+        import_details: list[ImportDetail],
         use_color: bool = True,
     ) -> None:
         """Initialize the report printer."""
@@ -698,40 +681,38 @@ class ReportPrinter:
             print()
             print(self._c(BOLD, " Unused imports removed:"))
             for detail in self._import_details:
-                print(f" \u2022 line {detail.lineno}: {self._c(DIM, detail.text)}")
+                print(f" • line {detail.lineno}: {self._c(DIM, detail.text)}")
         if unused_vars:
             print()
             print(self._c(BOLD, " Unused variables detected:"))
             for w in unused_vars:
-                print(f" {self._c(YELLOW, '\u26a0')} line {w.lineno}: {w.name}")
+                print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: {w.name}")
         if unused_funcs:
             print()
             print(self._c(BOLD, " Unused functions detected:"))
             for w in unused_funcs:
-                print(f" {self._c(YELLOW, '\u26a0')} line {w.lineno}: {w.name}()")
+                print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: {w.name}()")
         if vague_names:
             print()
             print(self._c(BOLD, " Vague variable names:"))
             for w in vague_names:
-                print(f" {self._c(YELLOW, '\u26a0')} line {w.lineno}: {w.name}")
+                print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: {w.name}")
         if shadowed:
             print()
             print(self._c(BOLD, " Shadowed built-in names:"))
             for w in shadowed:
-                print(f" {self._c(YELLOW, '\u26a0')} line {w.lineno}: {w.name}")
+                print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: {w.name}")
         print(self._c(CYAN, self.BORDER_DOUBLE))
         print()
 
-
 # ─── Diff Printer ─────────────────────────────────────────────────────────────
 def print_diff(
-    original_lines: List[str],
-    cleaned_lines: List[str],
+    original_lines: list[str],
+    cleaned_lines: list[str],
     filename: str = "source",
     use_color: bool = True,
 ) -> bool:
     """Print a color-coded unified diff between original and cleaned source.
-
     Returns ``True`` if there were any differences, ``False`` otherwise.
     """
     diff = list(difflib.unified_diff(
@@ -758,7 +739,6 @@ def print_diff(
         else:
             sys.stdout.write(line + "\n")
     return True
-
 
 # ─── CLI Argument Parsing ─────────────────────────────────────────────────────
 def _build_argument_parser() -> argparse.ArgumentParser:
@@ -811,7 +791,6 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     return parser
 
-
 # ─── Main Entry Point ─────────────────────────────────────────────────────────
 def main() -> int:
     """CLI entry point. Returns an exit code (0 = success, 1 = error)."""
@@ -844,7 +823,7 @@ def main() -> int:
     if args.warn_only:
         cleaned_lines = list(original_lines)
         stats = CleaningStats()
-        import_details: List[ImportDetail] = []
+        import_details: list[ImportDetail] = []
     else:
         cleaner = SourceCleaner(original_lines, analysis)
         cleaned_lines, stats, import_details = cleaner.clean()
@@ -896,12 +875,5 @@ def main() -> int:
         return 1
     return 0
 
-
 if __name__ == "__main__":
     sys.exit(main())
-
-
-# PyStreamliner automatic backups
-*.bak
-
-    
