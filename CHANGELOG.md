@@ -24,5 +24,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com).
 - Standardized ANSI colors throughout `ReportPrinter` and `print_diff`.
 
 ### Changed
-- Elevated minimum Python environment floor requirement to `requires-python = ">=3.10"` to leverage modern PEG parser AST stability.
+- Elevated minimum Python environment floor requirement to `requires-python = ">=3.13"` to leverage modern PEG parser AST stability.
 - Explicitly documented consecutive-only duplicate line removal restriction to preserve functional logical branching.
