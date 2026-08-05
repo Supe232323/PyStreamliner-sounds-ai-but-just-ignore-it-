@@ -6,11 +6,11 @@ This project does not receive ongoing security patches. If a vulnerability is fo
 
 | Version   | Supported          |
 | --------- | ------------------ |
-| v1.12.x   | :white_check_mark: |
-| v1.12.0   | :x:                |
-| v1.11     | :x:                |
-| v1.10     | :x:                |
-| <= v1.0   | :x:                |
+| v1.15.0   | :white_check_mark: |
+| v1.14.0   | :x:                |
+| v1.13.1     | :x:                |
+| v1.12.1     | :x:                |
+| <= v1.12   | :x:                |
 
 ## Reporting a Vulnerability
 
