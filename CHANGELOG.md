@@ -3,26 +3,72 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
-## - 2026-06-29
+## [1.15.0] - 2026-08-04
 
 ### Added
-- `--warn-only` flag to run checks in CI/linting pipelines without making modifications.
-- `--diff` flag to display a unified diff of proposed or completed changes.
-- `--backup` CLI flag to duplicate original files using `shutil.copy2` before modification.
-- `--dry-run` flag to print reports and diffs without writing to disk.
-- `--no-color` flag to strip ANSI character codes for clean log piping.
-- `_find_shadowed_builtins()` Tier 2 rule to catch variables overriding common built-ins (e.g., `id`, `len`).
-- Robust argument parsing CLI architecture using native `argparse`.
-- Pre-flight `ast.parse()` safety check to gracefully handle files with syntax errors.
+- `--check` / `-c` — exit non-zero if Tier-1 changes or Tier-2 warnings exist (CI-friendly)
+- `--quiet` / `-q` — suppress the structured report
+- `--json` — machine-readable JSON output
+- `--fix-only` — apply only Tier-1 fixes, suppress all Tier-2 warnings
+- `--select` / `--ignore` — filter warning categories
+- `--stdin` — read from stdin, write cleaned source to stdout
+- `--aggressive` — more aggressive blank-line collapsing (max 1 consecutive blank line)
 
-### Fixed
-- Replaced fragile line-number comprehension matching with robust parent-tree mapping (`_is_in_comprehension_or_lambda()`).
-- Blocked false-positive unused variable flags on pure type assignments (`x: int`) and forward references.
-- Added full multiline range removal and line reconstruction support for `from x import y` groupings.
-- Replaced fragile, complex regular expressions with `line.strip() == ""` for blank line checks.
-- Wrapped file reading and writing routines in try/except blocks to handle file-existence and permissions errors.
-- Standardized ANSI colors throughout `ReportPrinter` and `print_diff`.
+## [1.14.0] - 2026-08-04
 
 ### Changed
-- Elevated minimum Python environment floor requirement to `requires-python = ">=3.13"` to leverage modern PEG parser AST stability.
-- Explicitly documented consecutive-only duplicate line removal restriction to preserve functional logical branching.
+- Raised minimum Python version to 3.13
+- Modernized all type annotations to native generics and union syntax
+- Removed unnecessary `typing` imports
+
+## [1.13.1] - 2026-07-28
+
+### Added
+- `--warn-only` flag
+
+### Changed
+- Codebase refactor
+
+## [1.12.1] - 2026-07-17
+
+### Added
+- `[project.urls]` metadata (Homepage, Repository, Documentation)
+
+## [1.12.0] - 2026-07-17
+
+### Added
+- Native PyPI Trusted Publishing (OIDC) support
+- `skip-existing: true` in the publish pipeline
+- Explicit package discovery constraints in `pyproject.toml`
+
+### Fixed
+- Pipeline deployment crash caused by legacy authentication
+- `setuptools` flat-layout build issues (excluded `test_messy`)
+
+## [1.11.0] - 2026-06-30
+
+### Added
+- Install support via `pip install git+https://github.com/Supe232323/pystreamliner.git`
+
+## [1.10.0] - 2026-06-29
+
+### Added
+- `--warn-only`, `--diff`, `--backup`, `--dry-run`, `--no-color`
+- Shadowed builtins detection (Tier 2)
+- Robust `argparse` CLI
+- Pre-flight `ast.parse()` safety check
+
+### Fixed
+- Fragile comprehension/lambda detection → parent-tree mapping
+- False positives on pure type annotations
+- Multiline `from x import y` handling
+- Blank-line logic and file I/O error handling
+- ANSI color consistency
+
+### Changed
+- Minimum Python version set to 3.10 (later raised)
+
+## [1.0.0] - 2026-03-04
+
+### Added
+- Initial release
