@@ -91,16 +91,6 @@ python streamliner.py --dry-run your_file.py
 
 ---
 
-## Why not just use Black / isort / autoflake?
-
-Those are great tools and pystreamliner doesn't replace them. The difference:
-
-- **Black** formats style. pystreamliner removes dead code.
-- **autoflake** removes unused imports but doesn't warn about unused variables, vague names, or dead functions.
-- **pystreamliner** combines lightweight static analysis with conservative auto-fixing and a human-readable report — in a single file with zero dependencies.
-
----
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
