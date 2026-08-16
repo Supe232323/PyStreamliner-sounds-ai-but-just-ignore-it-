@@ -2,16 +2,25 @@
 
 ## Supported Versions
 
-This project does not receive ongoing security patches. If a vulnerability is found, the repository will be temporarily set to private while the code is being fixed. You must always use the latest release to ensure you have the latest fixes.
+Only the latest release is supported. Older versions do not receive security updates.
 
 | Version   | Supported          |
 | --------- | ------------------ |
-| v1.15.0   | :white_check_mark: |
-| v1.14.0   | :x:                |
-| v1.13.1     | :x:                |
-| v1.12.1     | :x:                |
-| <= v1.12   | :x:                |
+| v1.16.0   | :white_check_mark: |
+| < v1.16.0 | :x:                |
 
 ## Reporting a Vulnerability
 
-If you find a security vulnerability, do not open a public issue. Delete the application from your machine immediately and notify me directly so I can private the project and fix the code safely.
+If you discover a security vulnerability, **do not open a public issue**.
+
+Please report it privately by contacting the maintainer directly. Include:
+
+- A clear description of the issue
+- Steps to reproduce
+- Potential impact
+
+Once notified, the repository may be temporarily made private while a fix is prepared. Always use the latest release.
+
+## Scope
+
+pystreamliner is a local, zero-dependency source code analysis tool. It does not make network requests, execute analyzed code, or process untrusted input beyond reading the files you explicitly point it at. The main risks are the normal ones associated with any CLI tool that can rewrite files (use `--dry-run` when unsure).
