@@ -142,6 +142,10 @@ class SourceAnalyzer:
         warnings.extend(self._find_unused_functions())
         warnings.extend(self._find_vague_names())
         warnings.extend(self._find_shadowed_builtins())
+        warnings.extend(self._find_dangerous_calls())
+        warnings.extend(self._find_hardcoded_secrets())
+        warnings.extend(self._find_assert_used())
+        warnings.extend(self._find_broad_excepts())
         return AnalysisResult(
             unused_imports=unused_imports,
             warnings=warnings,
@@ -394,6 +398,160 @@ class SourceAnalyzer:
                 ))
         return warnings
 
+    def _find_dangerous_calls(self) -> list[Warning]:
+        """Detect dangerous function calls: eval/exec/compile, pickle, os.system, subprocess shell=True, yaml.load."""
+        warnings: list[Warning] = []
+        DANGEROUS_NAMES = frozenset({"eval", "exec", "compile"})
+        PICKLE_FUNCS = frozenset({"loads", "load", "dumps", "dump"})
+        OS_DANGEROUS = frozenset({"system", "popen", "popen2", "popen3", "popen4"})
+        for node in ast.walk(self._tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # Direct calls: eval(), exec(), compile()
+            if isinstance(node.func, ast.Name) and node.func.id in DANGEROUS_NAMES:
+                warnings.append(Warning(
+                    category="dangerous_call",
+                    name=node.func.id,
+                    lineno=node.lineno,
+                    message=f"⚠ Dangerous call '{node.func.id}()' at line {node.lineno}",
+                ))
+                continue
+            # Attribute calls
+            if isinstance(node.func, ast.Attribute):
+                attr = node.func.attr
+                # pickle / marshal / shelve
+                if isinstance(node.func.value, ast.Name):
+                    mod = node.func.value.id
+                    if mod in {"pickle", "marshal", "shelve"} and attr in PICKLE_FUNCS:
+                        warnings.append(Warning(
+                            category="dangerous_call",
+                            name=f"{mod}.{attr}",
+                            lineno=node.lineno,
+                            message=f"⚠ Dangerous call '{mod}.{attr}()' at line {node.lineno}",
+                        ))
+                        continue
+                    if mod == "os" and attr in OS_DANGEROUS:
+                        warnings.append(Warning(
+                            category="dangerous_call",
+                            name=f"os.{attr}",
+                            lineno=node.lineno,
+                            message=f"⚠ Dangerous call 'os.{attr}()' at line {node.lineno}",
+                        ))
+                        continue
+                    if mod == "yaml" and attr == "load":
+                        # Check if SafeLoader is used
+                        has_safe = False
+                        for kw in node.keywords:
+                            if kw.arg in {"Loader", "loader"} and isinstance(kw.value, ast.Attribute):
+                                if kw.value.attr in {"SafeLoader", "CSafeLoader"}:
+                                    has_safe = True
+                        if not has_safe:
+                            warnings.append(Warning(
+                                category="dangerous_call",
+                                name="yaml.load",
+                                lineno=node.lineno,
+                                message=f"⚠ Dangerous call 'yaml.load()' without SafeLoader at line {node.lineno}",
+                            ))
+                        continue
+                # subprocess.*.*(..., shell=True)
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
+                    for kw in node.keywords:
+                        if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                            warnings.append(Warning(
+                                category="dangerous_call",
+                                name=f"subprocess.{attr}",
+                                lineno=node.lineno,
+                                message=f"⚠ subprocess.{attr}() called with shell=True at line {node.lineno}",
+                            ))
+                            break
+                # Also catch subprocess.Popen etc via Attribute chain
+                if isinstance(node.func.value, ast.Attribute) and isinstance(node.func.value.value, ast.Name):
+                    if node.func.value.value.id == "subprocess":
+                        for kw in node.keywords:
+                            if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                                warnings.append(Warning(
+                                    category="dangerous_call",
+                                    name="subprocess",
+                                    lineno=node.lineno,
+                                    message=f"⚠ subprocess call with shell=True at line {node.lineno}",
+                                ))
+                                break
+        return warnings
+
+    def _find_hardcoded_secrets(self) -> list[Warning]:
+        """Flag assignments of string literals to variables whose names look like secrets."""
+        SECRET_NAMES = frozenset({
+            "password", "passwd", "pwd", "secret", "api_key", "apikey",
+            "token", "access_token", "auth_token", "private_key", "secret_key",
+            "client_secret", "aws_secret", "db_password",
+        })
+        warnings: list[Warning] = []
+        seen: set[tuple[str, int]] = set()
+        for node in ast.walk(self._tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                        name_lower = target.id.lower()
+                        if name_lower in SECRET_NAMES or any(s in name_lower for s in ("password", "secret", "token", "api_key")):
+                            key = (target.id, target.lineno)
+                            if key not in seen:
+                                seen.add(key)
+                                warnings.append(Warning(
+                                    category="hardcoded_secret",
+                                    name=target.id,
+                                    lineno=target.lineno,
+                                    message=f"⚠ Possible hardcoded secret in '{target.id}' at line {target.lineno}",
+                                ))
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                if isinstance(node.target, ast.Name) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                    name_lower = node.target.id.lower()
+                    if name_lower in SECRET_NAMES or any(s in name_lower for s in ("password", "secret", "token", "api_key")):
+                        key = (node.target.id, node.target.lineno)
+                        if key not in seen:
+                            seen.add(key)
+                            warnings.append(Warning(
+                                category="hardcoded_secret",
+                                name=node.target.id,
+                                lineno=node.target.lineno,
+                                message=f"⚠ Possible hardcoded secret in '{node.target.id}' at line {node.target.lineno}",
+                            ))
+        return warnings
+
+    def _find_assert_used(self) -> list[Warning]:
+        """Flag use of assert (often misused for control flow / security checks)."""
+        warnings: list[Warning] = []
+        for node in ast.walk(self._tree):
+            if isinstance(node, ast.Assert):
+                warnings.append(Warning(
+                    category="assert_used",
+                    name="assert",
+                    lineno=node.lineno,
+                    message=f"⚠ assert used at line {node.lineno} (stripped with -O; do not use for security checks)",
+                ))
+        return warnings
+
+    def _find_broad_excepts(self) -> list[Warning]:
+        """Flag bare except: and except Exception:"""
+        warnings: list[Warning] = []
+        for node in ast.walk(self._tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            if node.type is None:
+                warnings.append(Warning(
+                    category="broad_except",
+                    name="except:",
+                    lineno=node.lineno,
+                    message=f"⚠ Bare 'except:' at line {node.lineno}",
+                ))
+            elif isinstance(node.type, ast.Name) and node.type.id == "Exception":
+                warnings.append(Warning(
+                    category="broad_except",
+                    name="except Exception",
+                    lineno=node.lineno,
+                    message=f"⚠ Broad 'except Exception' at line {node.lineno}",
+                ))
+        return warnings
+
     def _get_line_text(self, lineno: int) -> str:
         if 1 <= lineno <= len(self._lines):
             return self._lines[lineno - 1]
@@ -547,6 +705,10 @@ class ReportPrinter:
         unused_funcs = [w for w in self._warnings if w.category == "unused_function"]
         vague_names = [w for w in self._warnings if w.category == "vague_name"]
         shadowed = [w for w in self._warnings if w.category == "shadowed_builtin"]
+        dangerous = [w for w in self._warnings if w.category == "dangerous_call"]
+        secrets = [w for w in self._warnings if w.category == "hardcoded_secret"]
+        asserts = [w for w in self._warnings if w.category == "assert_used"]
+        broad = [w for w in self._warnings if w.category == "broad_except"]
         print()
         print(self._c(CYAN, self.BORDER_DOUBLE))
         print(self._c(BOLD, " PyStreamliner Report"))
@@ -564,6 +726,10 @@ class ReportPrinter:
         print(f" Unused functions detected: {len(unused_funcs):>8d}")
         print(f" Vague variable names: {len(vague_names):>8d}")
         print(f" Shadowed built-ins: {len(shadowed):>8d}")
+        print(f" Dangerous calls: {len(dangerous):>8d}")
+        print(f" Possible hardcoded secrets: {len(secrets):>8d}")
+        print(f" Assert statements: {len(asserts):>8d}")
+        print(f" Broad except clauses: {len(broad):>8d}")
         print(self._c(CYAN, self.BORDER_SINGLE))
         if self._import_details:
             print()
@@ -589,6 +755,26 @@ class ReportPrinter:
             print()
             print(self._c(BOLD, " Shadowed built-in names:"))
             for w in shadowed:
+                print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: {w.name}")
+        if dangerous:
+            print()
+            print(self._c(BOLD, " Dangerous calls:"))
+            for w in dangerous:
+                print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: {w.message}")
+        if secrets:
+            print()
+            print(self._c(BOLD, " Possible hardcoded secrets:"))
+            for w in secrets:
+                print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: {w.name}")
+        if asserts:
+            print()
+            print(self._c(BOLD, " Assert statements:"))
+            for w in asserts:
+                print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: assert")
+        if broad:
+            print()
+            print(self._c(BOLD, " Broad except clauses:"))
+            for w in broad:
                 print(f" {self._c(YELLOW, '⚠')} line {w.lineno}: {w.name}")
         print(self._c(CYAN, self.BORDER_DOUBLE))
         print()
