@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.16.0] - 2026-08-15
+
+### Added
+- Tier-2 security detectors:
+  - Dangerous calls: `eval`, `exec`, `compile`, `pickle`/`marshal`/`shelve` load/dump, `os.system`/`os.popen`, `subprocess` with `shell=True`, `yaml.load` without SafeLoader
+  - Possible hardcoded secrets (assignments of string literals to names like password, secret, token, api_key, etc.)
+  - Use of `assert` (stripped under `-O`; not for security checks)
+  - Broad `except:` and `except Exception:`
+- New warning categories: `dangerous_call`, `hardcoded_secret`, `assert_used`, `broad_except`
+- Report now includes counts and details for the new security warnings
+
 ## [1.15.0] - 2026-08-04
 
 ### Added
