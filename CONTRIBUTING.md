@@ -1,50 +1,49 @@
-# Contributing to pystreamliner
+# contributing to pystreamliner
 
-Thanks for considering a contribution. Bug fixes, new detection rules, and documentation improvements are all welcome.
+thanks for considering a contribution. bug fixes, new detection rules, and documentation improvements are all welcome.
 
 ---
 
-## How to contribute
+## how to contribute
 
-1. **Fork the repository**
-2. **Create a feature branch**
+1. **fork the repository**
+2. **create a feature branch**
    ```bash
    git checkout -b feature/your-feature-name
    ```
-3. **Make your changes**
-4. **Test against a messy Python file** to make sure nothing breaks
-5. **Open a pull request** with a short description of what you changed and why
+3. **make your changes**
+4. **test against a messy Python file** to make sure nothing breaks
+5. **open a pull request** with a short description of what you changed and why
 
 ---
 
-## What we accept
+## what we accept
+- new Tier 2 detection rules (unused code patterns, naming issues, etc.)
+- improvements to existing analysis logic
+- bug fixes
+- documentation improvements
+- performance enhancements
 
-- New Tier 2 detection rules (unused code patterns, naming issues, etc.)
-- Improvements to existing analysis logic
-- Bug fixes
-- Documentation improvements
-- Performance enhancements
-
-If you're unsure whether something fits, open an issue first and ask.
-
----
-
-## What we don't accept
-
-- Auto-fixes that could change program behavior
-- Dependencies (pystreamliner is intentionally zero-dependency)
-- Anything that requires Python < 3.13+
+if you're unsure whether something fits, open an issue first and ask.
 
 ---
 
-## Code style
+## what we don't accept
 
-- Follow PEP 8
-- Add docstrings to new classes and methods
-- If you're adding a new detection rule, include a before/after example in your PR description
+- auto-fixes that could change program behavior
+- dependencies (pystreamliner is intentionally zero-dependency)
+- anything that requires Python < 3.13+
+
+---
+
+## code style
+
+- follow PEP 8
+- add docstrings to new classes and methods
+- if you're adding a new detection rule, include a before/after example in your PR description
 
 ---
 
 ## Questions?
 
-Open an issue or ask directly in the pull request. All feedback is appreciated.
+open an issue or ask directly in the pull request. all feedback is appreciated.
