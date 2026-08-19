@@ -81,7 +81,7 @@ When you process 5 or more files (configurable with `--summary-threshold`), pyst
 
 ```
 ══════════════════════════════════════════════════
- PyStreamliner Summary
+ pystreamliner Summary
 ══════════════════════════════════════════════════
  Files processed:         47
  Clean (no issues):       39
@@ -110,7 +110,7 @@ This keeps the output usable even on large codebases.
 
 ```
 ══════════════════════════════════════════
-  PyStreamliner Report
+  pystreamliner Report
 ══════════════════════════════════════════
   File:                        main.py
   Lines analyzed:                   312
