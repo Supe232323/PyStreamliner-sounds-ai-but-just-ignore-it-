@@ -1,26 +1,26 @@
-# Security Policy
+# security policy
 
-## Supported Versions
+## supported versions
 
-Only the latest release is supported. Older versions do not receive security updates.
+only the latest release is supported. older versions do not receive security updates.
 
-| Version   | Supported          |
+| version   | supported          |
 | --------- | ------------------ |
-| v1.16.0   | :white_check_mark: |
-| < v1.16.0 | :x:                |
+| v1.17.0   | :white_check_mark: |
+| < v1.17.0 | :x:                |
 
-## Reporting a Vulnerability
+## reporting a vulnerability
 
-If you discover a security vulnerability, **do not open a public issue**.
+if you discover a security vulnerability, **do not open a public issue**.
 
-Please report it privately by contacting the maintainer directly. Include:
+please report it privately by contacting the maintainer directly. Include:
 
-- A clear description of the issue
-- Steps to reproduce
-- Potential impact
+- a clear description of the issue
+- steps to reproduce
+- potential impact
 
-Once notified, the repository may be temporarily made private while a fix is prepared. Always use the latest release.
+once notified, the repository may be temporarily made private while a fix is prepared. always use the latest release.
 
-## Scope
+## scope
 
-pystreamliner is a local, zero-dependency source code analysis tool. It does not make network requests, execute analyzed code, or process untrusted input beyond reading the files you explicitly point it at. The main risks are the normal ones associated with any CLI tool that can rewrite files (use `--dry-run` when unsure).
+pystreamliner is a local, zero-dependency source code analysis tool. it does not make network requests, execute analyzed code, or process untrusted input beyond reading the files you explicitly point it at. the main risks are the normal ones associated with any CLI tool that can rewrite files (use `--dry-run` when unsure).
