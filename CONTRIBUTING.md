@@ -12,13 +12,13 @@ thanks for considering a contribution. bug fixes, new detection rules, and docum
    git checkout -b feature/your-feature-name
    ```
 3. **make your changes**
-4. **test against a messy Python file** to make sure nothing breaks
+4. **test against a messy python file** to make sure nothing breaks
 5. **open a pull request** with a short description of what you changed and why
 
 ---
 
 ## what we accept
-- new Tier 2 detection rules (unused code patterns, naming issues, etc.)
+- new tier 2 detection rules (unused code patterns, naming issues, etc.)
 - improvements to existing analysis logic
 - bug fixes
 - documentation improvements
@@ -32,7 +32,7 @@ if you're unsure whether something fits, open an issue first and ask.
 
 - auto-fixes that could change program behavior
 - dependencies (pystreamliner is intentionally zero-dependency)
-- anything that requires Python < 3.13+
+- anything that requires python < 3.13+
 
 ---
 
@@ -40,10 +40,10 @@ if you're unsure whether something fits, open an issue first and ask.
 
 - follow PEP 8
 - add docstrings to new classes and methods
-- if you're adding a new detection rule, include a before/after example in your PR description
+- if you're adding a new detection rule, include a before/after example in your pr description
 
 ---
 
-## Questions?
+## questions?
 
 open an issue or ask directly in the pull request. all feedback is appreciated.
