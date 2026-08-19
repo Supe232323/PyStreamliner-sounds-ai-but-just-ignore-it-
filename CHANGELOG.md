@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.17.0] - 2026-08-19
+
+### Added
+- **Multi-file and recursive directory support**
+  - Accept multiple files and/or directories on the command line
+  - Directories are walked recursively for `*.py` files
+  - Automatically skips common junk directories: `.git`, `__pycache__`, `venv`, `.venv`, `env`, `node_modules`, `dist`, `build`, `.tox`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, etc.
+- **Tight summary mode for large runs**
+  - When processing 5 or more files (configurable via `--summary-threshold`), switches from per-file detailed reports to a compact summary
+  - Summary shows: files processed / clean / modified / warnings-only / errors, aggregate stats, and a short list of files that actually changed or had warnings
+- New CLI argument: `--summary-threshold N` (default: 5)
+
+### Changed
+- CLI argument renamed from `file` to `paths` (still accepts a single file for backward compatibility)
+- README updated with multi-file usage examples and summary mode documentation
+
 ## [1.16.0] - 2026-08-15
 
 ### Added
