@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.19.0] - 2026-08-20
+
+### Added
+- **Config file support** (zero dependencies)
+  - Reads from `pyproject.toml` under `[tool.pystreamliner]`
+  - Or a dedicated `.pystreamliner.toml` in the current directory
+  - Supported keys: `aggressive`, `ignore`, `select`, `summary_threshold`, `jobs`, `exclude` (list of globs), `fix_only`, `warn_only`
+  - CLI flags always override config values
+- **Path / glob excludes**
+  - New `--exclude-path` (repeatable) for glob patterns, e.g. `--exclude-path 'tests/**' --exclude-path '**/migrations/*'`
+  - Also configurable via `exclude = ["tests/**", "**/migrations/*"]` in the config file
+  - Uses only the standard library (`fnmatch`)
+
+### Changed
+- `_collect_python_files` now respects exclude globs in addition to the built-in junk directory list
+
 ## [1.18.0] - 2026-08-19
 
 ### Added
