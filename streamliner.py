@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: SSPL-1.0
+# SPDX-License-Identifier: AGPL-3.0
 # Copyright (c) 2026 Supe232323
 #!/usr/bin/env python3
 """PyStreamliner — A conservative, zero-dependency Python source code cleaner.
