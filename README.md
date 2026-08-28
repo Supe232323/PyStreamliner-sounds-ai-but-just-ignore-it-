@@ -9,6 +9,8 @@ pystreamliner uses Python's AST (abstract syntax tree) to safely detect and fix 
 
 Supports single files, multiple files, and recursive directory cleaning with a tight summary mode for large runs.
 
+**Discord:** [https://discord.gg/Z6cXxhSKS](https://discord.gg/Z6cXxhSKS)
+
 ---
 
 ## What it does
