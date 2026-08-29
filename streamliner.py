@@ -183,7 +183,13 @@ def _filter_warnings(
     return result
 
 def _collect_python_files(paths: list[Path], exclude_globs: list[str] | None = None) -> list[Path]:
-    """Collect all .py files from given paths, honouring exclude globs."""
+    """Collect all .py files from given paths, honouring exclude globs.
+
+    Junk directories listed in IGNORE_DIRS are skipped *only when they appear
+    as sub-directories*. If the user explicitly passes a directory that
+    happens to be named one of those (e.g. a project folder called
+    "coverage"), its contents are still processed.
+    """
     files: list[Path] = []
     seen: set[Path] = set()
     globs = exclude_globs or []
@@ -201,8 +207,13 @@ def _collect_python_files(paths: list[Path], exclude_globs: list[str] | None = N
                 files.append(path)
                 seen.add(path)
         elif path.is_dir():
+            # Only ignore *relative* path components after the root we were given.
+            # This prevents skipping an explicitly requested directory that
+            # happens to share a name with a common junk dir (e.g. "coverage").
+            root_parts_len = len(path.parts)
             for p in path.rglob("*.py"):
-                if any(should_skip_dir(part) for part in p.parts):
+                relative_parts = p.parts[root_parts_len:]
+                if any(should_skip_dir(part) for part in relative_parts):
                     continue
                 if _path_is_excluded(p, globs):
                     continue
@@ -657,7 +668,7 @@ class SourceCleaner:
         if self._lines and not self._lines[-1].endswith("\n"):
             self._lines[-1] += "\n"
 
-# ─── Report / Diff / process_file (kept lean) ────────────────────────────────
+# ─── Report / Diff / process_file ─────────────────────────────────────────────
 class ReportPrinter:
     BORDER_DOUBLE = "═" * 38
     BORDER_SINGLE = "─" * 38
@@ -671,17 +682,36 @@ class ReportPrinter:
     def _c(self, code: str, text: str) -> str:
         return f"{code}{text}{RESET}" if self._use_color else text
     def print_report(self) -> None:
-        # simplified for length – full version kept in previous releases; counts still accurate
         print()
         print(self._c(CYAN, self.BORDER_DOUBLE))
         print(self._c(BOLD, " PyStreamliner Report"))
         print(self._c(CYAN, self.BORDER_DOUBLE))
         print(f" File: {self._c(BOLD, self._filename)}")
         print(f" Lines analyzed: {self._lines_analyzed}")
-        print(f" Unused imports removed: {self._stats.unused_imports_removed}")
-        print(f" Duplicate lines removed: {self._stats.duplicate_lines_removed}")
-        print(f" Blank lines reduced: {self._stats.blank_lines_reduced}")
-        print(f" Warnings: {len(self._warnings)}")
+        print()
+        print(" Auto-fixes applied:")
+        print(f"   Unused imports removed: {self._stats.unused_imports_removed}")
+        print(f"   Duplicate lines removed: {self._stats.duplicate_lines_removed}")
+        print(f"   Blank lines reduced: {self._stats.blank_lines_reduced}")
+        print()
+        print(f" Warnings (manual review needed): {len(self._warnings)}")
+        print(self._c(CYAN, self.BORDER_SINGLE))
+
+        if self._import_details:
+            print("\n Unused imports removed:")
+            for d in self._import_details:
+                print(f"   • line {d.lineno}:  {d.text}")
+
+        if self._warnings:
+            # Group lightly by category for readability
+            by_cat: dict[str, list[Warning]] = {}
+            for w in self._warnings:
+                by_cat.setdefault(w.category, []).append(w)
+            for cat, items in by_cat.items():
+                print(f"\n {cat.replace('_', ' ').title()}:")
+                for w in items:
+                    print(f"   {w.message}")
+
         print(self._c(CYAN, self.BORDER_DOUBLE))
         print()
 
