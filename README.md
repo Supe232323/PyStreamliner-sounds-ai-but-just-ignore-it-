@@ -23,6 +23,7 @@ Supports single files, multiple files, and recursive directory cleaning with a t
 **Warnings (Tier 2 — reported, never auto-changed):**
 - Unused variables
 - Unused top-level functions
+- Unused classes
 - Vague variable names (`x`, `tmp`, `foo`, `bar`, etc.)
 - Shadowed built-ins
 - Dangerous calls (`eval`, `exec`, `pickle`, `os.system`, `subprocess(..., shell=True)`, unsafe `yaml.load`)
@@ -63,7 +64,7 @@ pystreamliner .
 pystreamliner src/ tests/
 ```
 
-Directories are walked recursively. Common junk directories (`.git`, `__pycache__`, `venv`, `node_modules`, etc.) are automatically skipped.
+Directories are walked recursively. Common junk directories (`.git`, `__pycache__`, `venv`, `node_modules`, etc.) are automatically skipped when they appear as *sub*-directories.
 
 **Preview without modifying:**
 ```bash
@@ -141,6 +142,40 @@ This keeps the output usable even on large codebases.
     ⚠ line 23:  tmp
 ══════════════════════════════════════════
 ```
+
+---
+
+## Limitations / By design
+
+These behaviours are intentional. They keep the tool zero-dependency, fast, and conservative.
+
+### Unused function / class detection is **per-file only**
+
+pystreamliner analyses each file independently using only that file's AST.  
+It does **not** follow imports across modules or build a whole-project symbol table.
+
+Consequence: a function or class that is defined in one file and imported + used in another file will be reported as unused when you run the tool on the definition file alone.
+
+This is by design. Full inter-module analysis would require either a much heavier dependency stack or a complete project-wide index, both of which go against the tool's zero-dependency, single-pass philosophy.
+
+**Work-arounds:**
+- Put public API names in `__all__` — they are automatically treated as used.
+- Use `--ignore unused_function,unused_class` (or the config equivalent).
+- Run the tool on the whole project (or the relevant packages) so the definitions and call sites are more likely to be in the same analysis pass when you care about the warnings.
+
+### Directory name collisions with the ignore list
+
+The built-in ignore list contains common junk directories (`__pycache__`, `.git`, `venv`, `coverage`, `htmlcov`, etc.).  
+These are only skipped when they appear as *sub-directories* of a path you gave the tool.
+
+If you explicitly pass a directory that happens to be named one of those (e.g. `pystreamliner coverage/`), its contents **are** processed. (This was fixed in 1.19.1.)
+
+Nested junk directories inside that tree are still skipped as expected.
+
+### Summary mode vs detailed reports
+
+When ≥ 5 files are processed (configurable), output switches to a compact summary that shows counts only.  
+Detailed per-file reports (with every warning message) appear only for smaller runs. This is intentional so large projects stay readable.
 
 ---
 
