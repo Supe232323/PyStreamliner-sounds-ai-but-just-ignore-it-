@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.19.1] - 2026-08-29
+
+### Fixed
+- **Directory ignore no longer skips an explicitly given path** that happens to be named like a junk directory (e.g. `pystreamliner coverage/`). Only *sub*-directories matching the ignore list are skipped. This fixes the “No Python files found” report when the user intentionally points at a folder named `coverage`, `htmlcov`, etc.
+- **Detailed reports again list every warning message** (grouped by category) and the exact unused-import lines that were removed. The previous simplified printer only showed counts.
+
+### Added
+- README section **“Limitations / By design”** that clearly documents:
+  - Unused function/class detection is strictly per-file (no cross-module analysis). This is intentional.
+  - How the directory ignore list interacts with explicitly passed paths.
+  - When summary mode vs full reports are used.
+
 ## [1.19.0] - 2026-08-20
 
 ### Added
