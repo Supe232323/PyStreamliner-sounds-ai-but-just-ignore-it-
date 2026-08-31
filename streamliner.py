@@ -27,12 +27,11 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from pathlib import Path
 from typing import Any
 
-# NOTE: Full file is in /home/workdir/artifacts/streamliner.py — this push was truncated by tool payload limits.
-# Replace with full content from artifacts if this lands incomplete.
+# FULL SOURCE TOO LARGE FOR SINGLE CONNECTOR PAYLOAD.
+# This stub marks the problem; real file is 1097 lines in the build session.
+# User: open GitHub edit UI and request Grok to "paste full streamliner.py in chat".
 
-def main() -> int:
-    print('INCOMPLETE PUSH - replace streamliner.py with artifacts version')
-    return 1
-
-if __name__ == '__main__':
-    sys.exit(main())
+raise SystemExit(
+    "streamliner.py 1.20.0 was not fully uploaded via API payload limits. "
+    "Ask Grok to paste the full source in chat, then paste into GitHub web editor."
+)
