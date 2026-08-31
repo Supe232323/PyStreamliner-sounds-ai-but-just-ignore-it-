@@ -7,7 +7,7 @@
 
 pystreamliner uses Python's AST (abstract syntax tree) to safely detect and fix common code issues. It operates on two tiers: things it can fix automatically with zero risk, and things it flags for you to review manually.
 
-Supports single files, multiple files, and recursive directory cleaning with a tight summary mode for large runs.
+Supports single files, multiple files, and recursive directory cleaning with a tight summary mode for large runs. Emits JSON and **SARIF 2.1.0** for CI. Optional mtime cache for repeated local runs.
 
 **Discord:** [https://discord.gg/Z6cXxhSKS](https://discord.gg/Z6cXxhSKS)
 
@@ -76,72 +76,63 @@ pystreamliner --dry-run .
 pystreamliner --check --quiet .
 ```
 
+**SARIF for Code Scanning / security dashboards:**
+```bash
+pystreamliner --sarif --dry-run . > results.sarif
+```
+
+**JSON for scripts:**
+```bash
+pystreamliner --json --dry-run .
+```
+
+**Faster repeated local runs (mtime cache):**
+```bash
+pystreamliner --cache .
+# optional custom cache path
+pystreamliner --cache --cache-file /tmp/ps-cache.json .
+```
+
+**Parallelism:**
+```bash
+# default is sequential (-j 1) — safest for small trees
+pystreamliner .
+
+# auto (capped workers)
+pystreamliner -j 0 .
+
+# explicit workers; prefer threads on many small files
+pystreamliner -j 4 --threads .
+```
+
 ---
 
 ## Big runs / Summary mode
 
-When you process 5 or more files (configurable with `--summary-threshold`), pystreamliner switches to a compact summary instead of dumping a full report for every file:
-
-```
-══════════════════════════════════════════════════
- pystreamliner summary
-══════════════════════════════════════════════════
- Files processed:         47
- Clean (no issues):       39
- Modified:                 6
- Warnings only:            2
-
- Totals:
- Unused imports removed:      14
- Duplicate lines removed:      3
- Blank lines reduced:         11
- Warnings issued:              8
-──────────────────────────────────────────────────
-
- Files modified:
-  ✓ src/utils.py  (3 imports, 2 blanks)
-  ✓ src/main.py   (1 imports + 2 warnings)
-  ...
-══════════════════════════════════════════════════
-```
-
-This keeps the output usable even on large codebases.
+When you process 5 or more files (configurable with `--summary-threshold`), pystreamliner switches to a compact summary instead of dumping a full report for every file.
 
 ---
 
-## Example (single-file detailed report)
+## CLI reference (high-signal flags)
 
-```
-══════════════════════════════════════════
-  pystreamliner report
-══════════════════════════════════════════
-  File:                        main.py
-  Lines analyzed:                   312
+| Flag | Purpose |
+|------|---------|
+| `-d, --dry-run` | Analyze / report only; do not write |
+| `-c, --check` | Exit 1 if changes or warnings (CI) |
+| `-q, --quiet` | Suppress human report |
+| `--json` | Machine-readable JSON (includes `import_details`) |
+| `--sarif` | SARIF 2.1.0 report on stdout |
+| `--cache` | Skip unchanged files (mtime + size) |
+| `--cache-file PATH` | Cache location (default `.pystreamliner_cache.json`) |
+| `-j, --jobs N` | Workers; **default 1**; `0` = auto (capped) |
+| `--threads` | Use threads instead of processes when `jobs > 1` |
+| `-w, --warn-only` | Report only; never rewrite |
+| `--fix-only` | Tier-1 fixes only; suppress Tier-2 warnings |
+| `--select` / `--ignore` | Filter warning categories |
+| `--exclude-path` | Glob path excludes (repeatable) |
+| `--aggressive` | Stricter blank-line collapsing |
 
-  Auto-fixes applied:
-    Unused imports removed:           3
-    Duplicate lines removed:          1
-    Blank lines reduced:              2
-
-  Warnings (manual review needed):
-    Unused variables detected:        2
-    Unused functions detected:        1
-    Vague variable names:             1
-──────────────────────────────────────────
-
-  Unused imports removed:
-    • line 4:  import os
-    • line 5:  import sys
-    • line 7:  from pathlib import Path, PurePath  (partially cleaned: kept 'Path')
-
-  Unused variables:
-    ⚠ line 42:  result
-    ⚠ line 87:  temp_val
-
-  Vague variable names:
-    ⚠ line 23:  tmp
-══════════════════════════════════════════
-```
+Config file support (zero deps): `.pystreamliner.toml` or `[tool.pystreamliner]` in `pyproject.toml`. CLI always wins.
 
 ---
 
@@ -176,6 +167,10 @@ Nested junk directories inside that tree are still skipped as expected.
 
 When ≥ 5 files are processed (configurable), output switches to a compact summary that shows counts only.  
 Detailed per-file reports (with every warning message) appear only for smaller runs. This is intentional so large projects stay readable.
+
+### Parallelism defaults
+
+Default is sequential (`-j 1`). Process pools have non-trivial spawn cost; for many small files prefer `--threads` or leave the default alone. Use `-j 0` only when you know you want capped multi-core.
 
 ---
 
