@@ -773,7 +773,7 @@ def print_diff(original_lines: list[str], cleaned_lines: list[str], filename: st
 def _sarif_rule_id(category: str) -> str:
     return f"PYS/{category}"
 
-def build_sarif(results: list[FileResult], tool_name: str = "pystreamliner", tool_version: str = "1.20.0") -> dict[str, Any]:
+def build_sarif(results: list[FileResult], tool_name: str = "pystreamliner", tool_version: str = "1.20.3") -> dict[str, Any]:
     """Build a minimal SARIF 2.1.0 document from FileResults."""
     rules_seen: dict[str, dict[str, Any]] = {}
     sarif_results: list[dict[str, Any]] = []
