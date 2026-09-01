@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pystreamliner"
-version = "1.20.1"
+version = "1.20.2"
 description = "A conservative, zero-dependency Python source code cleaner"
 readme = "README.md"
 requires-python = ">=3.13"
 classifiers = [
-    "License :: OSI Approved :: GNU Affero General Public License v3 or later"
+    "License :: OSI Approved :: GNU Affero General Public License v3"
 ]
 authors = [
     {name = "Supe232323"}
