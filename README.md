@@ -1,6 +1,7 @@
 # pystreamliner
-[![PyPI version](https://shields.io)](https://pypi.org/project/pystreamliner/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/pystreamliner)](https://pypi.org/project/pystreamliner/)
+[![PyPI version](https://badgen.net)](https://pypi.org)
+[![PyPI downloads](https://badgen.net)](https://pypi.org)
+
 
 **Automatically clean up messy Python files — without breaking anything.**
 
