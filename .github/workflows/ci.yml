@@ -1,1 +1,40 @@
+name: CI
 
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Self-check (dry-run + check mode)
+        run: |
+          pystreamliner --dry-run --check test_messy.py || true
+          pystreamliner --dry-run --json test_messy.py
+          pystreamliner --dry-run --sarif test_messy.py > results.sarif
+
+      - name: Upload SARIF (optional, for Code Scanning)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+        continue-on-error: true
