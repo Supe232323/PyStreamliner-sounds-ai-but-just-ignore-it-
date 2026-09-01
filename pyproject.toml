@@ -9,9 +9,13 @@ description = "A conservative, zero-dependency Python source code cleaner"
 readme = "README.md"
 requires-python = ">=3.13"
 license = {text = "AGPL-3.0-or-later"}
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later"
+]
 authors = [
     {name = "Supe232323"}
 ]
+
 
 [project.scripts]
 pystreamliner = "streamliner:main"
@@ -23,3 +27,4 @@ Issues = "https://github.com/Supe232323/pystreamliner/issues"
 
 [tool.setuptools]
 py-modules = ["streamliner"]
+
