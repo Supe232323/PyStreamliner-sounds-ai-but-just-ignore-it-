@@ -1,6 +1,7 @@
 # pystreamliner
-[![PyPI version](https://badgen.net/pypi/v/pystreamliner?v=7)](https://pypi.org)
-[![PyPI downloads](https://badgen.net/pypi/dm/pystreamliner?v=7)](https://pypi.org)
+[![PyPI version](https://badgen.net/pypi/v/pystreamliner?v=25)](https://pypi.org)
+[![PyPI downloads](https://badgen.net/pypi/dm/pystreamliner?v=25)](https://pypi.org)
+
 
 
 
