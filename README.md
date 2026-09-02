@@ -1,6 +1,7 @@
 # pystreamliner
-[![PyPI version](https://badgen.net/pypi/v/pystreamliner?v=25)](https://pypi.org)
-[![PyPI downloads](https://badgen.net/pypi/dm/pystreamliner?v=25)](https://pypi.org)
+[![PyPI](https://badgen.net/pypi/v/pystreamliner)](https://pypi.org/project/pystreamliner/)
+[![Python](https://badgen.net/badge/python/3.13+/blue)](https://www.python.org/downloads/)
+[![License](https://badgen.net/badge/license/AGPL-3.0/blue)](https://www.gnu.org/licenses/agpl-3.0)
 
 
 
