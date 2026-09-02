@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com).
 
+## [1.21.0] - 2026-09-01
+
+### Added
+- **`--project`** — opt-in, zero-dependency cross-file unused function/class suppression
+  - Builds a name index over every `.py` file in the current run (imports, attribute access, identifier strings, `__all__`)
+  - Drops `unused_function` / `unused_class` warnings when the name is referenced in another file
+  - Default remains per-file (conservative, cheap, single-pass)
+  - Config key: `project = true` under `[tool.pystreamliner]` / `.pystreamliner.toml`
+  - Not a full import resolver — name-based only; `import *` and dynamic getattr stay out of scope
+
+### Changed
+- README Limitations section now documents `--project` as the opt-in fill for the per-file unused gap
+
+### Fixed
+- Removed unused `hashlib` import (cache fingerprint is size+mtime; hashlib was dead)
+
 ## [1.20.0] - 2026-08-31
 
 ### Added

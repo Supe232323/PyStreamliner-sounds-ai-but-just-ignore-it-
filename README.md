@@ -108,6 +108,13 @@ pystreamliner -j 0 .
 pystreamliner -j 4 --threads .
 ```
 
+**Cross-file unused functions / classes (opt-in):**
+```bash
+pystreamliner --project --dry-run src/
+```
+
+Name-based: if another file in the same run imports or references the name, the unused_function / unused_class warning is dropped. Default remains per-file. Zero extra dependencies.
+
 ---
 
 ## Big runs / Summary mode
@@ -129,6 +136,7 @@ When you process 5 or more files (configurable with `--summary-threshold`), pyst
 | `--cache-file PATH` | Cache location (default `.pystreamliner_cache.json`) |
 | `-j, --jobs N` | Workers; **default 1**; `0` = auto (capped) |
 | `--threads` | Use threads instead of processes when `jobs > 1` |
+| `--project` | Suppress unused function/class warnings if the name is referenced in another file in this run |
 | `-w, --warn-only` | Report only; never rewrite |
 | `--fix-only` | Tier-1 fixes only; suppress Tier-2 warnings |
 | `--select` / `--ignore` | Filter warning categories |
@@ -143,19 +151,21 @@ Config file support (zero deps): `.pystreamliner.toml` or `[tool.pystreamliner]`
 
 These behaviours are intentional. They keep the tool zero-dependency, fast, and conservative.
 
-### Unused function / class detection is **per-file only**
+### Unused function / class detection is **per-file by default**
 
-pystreamliner analyses each file independently using only that file's AST.  
-It does **not** follow imports across modules or build a whole-project symbol table.
+By default pystreamliner analyses each file independently using only that file's AST.  
+It does **not** follow imports across modules unless you pass **`--project`**.
 
-Consequence: a function or class that is defined in one file and imported + used in another file will be reported as unused when you run the tool on the definition file alone.
+Consequence without `--project`: a function or class that is defined in one file and imported + used in another file will be reported as unused when you run the tool on the definition file alone.
 
-This is by design. Full inter-module analysis would require either a much heavier dependency stack or a complete project-wide index, both of which go against the tool's zero-dependency, single-pass philosophy.
+**`--project`** (also `project = true` in config) builds a cheap name index over every file in the current run and suppresses `unused_function` / `unused_class` when the name is referenced elsewhere (imports, attribute access, identifier strings, `__all__`). Still zero third-party deps. It is **not** a full import resolver: it does not understand types, `import *`, or dynamic getattr beyond literal strings.
 
-**Work-arounds:**
+This stays opt-in so the default remains conservative and single-pass cheap.
+
+**Work-arounds without `--project`:**
 - Put public API names in `__all__` — they are automatically treated as used.
 - Use `--ignore unused_function,unused_class` (or the config equivalent).
-- Run the tool on the whole project (or the relevant packages) so the definitions and call sites are more likely to be in the same analysis pass when you care about the warnings.
+- Run with `--project` on the whole package so definitions and call sites share one index.
 
 ### Directory name collisions with the ignore list
 

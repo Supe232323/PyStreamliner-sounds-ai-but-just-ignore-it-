@@ -7,7 +7,7 @@ Two-tier model:
   Tier 2 (Warn-only): Detection + report, zero modification.
 Supports single files, multiple files, recursive directory cleaning,
 parallel processing via --jobs, config files, path excludes, mtime cache,
-JSON and SARIF output.
+JSON and SARIF output. Optional --project cross-file unused suppression.
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ import ast
 import dataclasses
 import difflib
 import fnmatch
-import hashlib
 import json
 import os
 import re
@@ -45,6 +44,7 @@ CACHE_FILENAME = ".pystreamliner_cache.json"
 # -j 0 means "auto" (capped).
 DEFAULT_JOBS = 1
 AUTO_JOBS_CAP = 4
+PROJECT_UNUSED_CATEGORIES: frozenset[str] = frozenset({"unused_function", "unused_class"})
 
 IGNORE_DIRS: frozenset[str] = frozenset({
     ".git", "__pycache__", "venv", ".venv", "env", ".env",
@@ -192,6 +192,89 @@ def _filter_cached_files(files: list[Path], cache: dict[str, str]) -> tuple[list
         else:
             to_process.append(p)
     return to_process, skipped
+
+# ─── Project-wide unused function/class suppression ───────────────────────────
+def _collect_project_refs(source: str) -> set[str]:
+    """Names referenced in a file: loads, attributes, imports, identifier strings, __all__.
+
+    Used by --project to suppress unused_function / unused_class when another
+    file in the same run references the name. Name-based, not a full resolver.
+    """
+    names: set[str] = set()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return names
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+            if isinstance(node.value, ast.Name):
+                names.add(node.value.id)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            candidate = node.value.strip()
+            if candidate.isidentifier():
+                names.add(candidate)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                for part in alias.name.split("."):
+                    if part:
+                        names.add(part)
+                if alias.asname:
+                    names.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                for part in node.module.split("."):
+                    if part:
+                        names.add(part)
+            for alias in node.names:
+                if alias.name != "*":
+                    names.add(alias.name)
+                if alias.asname:
+                    names.add(alias.asname)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "__all__":
+                    if isinstance(node.value, (ast.List, ast.Tuple)):
+                        for elt in node.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                names.add(elt.value)
+    return names
+
+
+def _index_project_refs(files: list[Path]) -> dict[str, set[str]]:
+    """Map resolved path -> referenced names. Cheap extra parse; stdlib only."""
+    index: dict[str, set[str]] = {}
+    for path in files:
+        key = str(path.resolve())
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            index[key] = set()
+            continue
+        index[key] = _collect_project_refs(source)
+    return index
+
+
+def _apply_project_unused(results: list[FileResult], file_refs: dict[str, set[str]]) -> None:
+    """Drop unused_function / unused_class warnings whose names are referenced elsewhere."""
+    if len(file_refs) < 2:
+        return
+    for result in results:
+        if result.error or not result.warnings:
+            continue
+        key = str(result.path.resolve())
+        external: set[str] = set()
+        for other_key, refs in file_refs.items():
+            if other_key != key:
+                external |= refs
+        if not external:
+            continue
+        result.warnings = [
+            w for w in result.warnings
+            if not (w.category in PROJECT_UNUSED_CATEGORIES and w.name in external)
+        ]
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 def _build_parent_map(tree: ast.AST) -> dict[int, ast.AST]:
@@ -773,7 +856,7 @@ def print_diff(original_lines: list[str], cleaned_lines: list[str], filename: st
 def _sarif_rule_id(category: str) -> str:
     return f"PYS/{category}"
 
-def build_sarif(results: list[FileResult], tool_name: str = "pystreamliner", tool_version: str = "1.20.3") -> dict[str, Any]:
+def build_sarif(results: list[FileResult], tool_name: str = "pystreamliner", tool_version: str = "1.21.0") -> dict[str, Any]:
     """Build a minimal SARIF 2.1.0 document from FileResults."""
     rules_seen: dict[str, dict[str, Any]] = {}
     sarif_results: list[dict[str, Any]] = []
@@ -880,7 +963,7 @@ def _process_file_worker(payload: tuple[str, dict, list[int]]) -> FileResult:
 def _build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pystreamliner",
-        description="PyStreamliner - conservative zero-dependency Python cleaner. Supports multi-file, parallel, config, and path excludes.",
+        description="PyStreamliner - conservative zero-dependency Python cleaner. Supports multi-file, parallel, config, path excludes, and optional --project cross-file unused suppression.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("paths", nargs="*", default=[], help="Files or directories to clean")
@@ -910,6 +993,8 @@ def _build_argument_parser() -> argparse.ArgumentParser:
                         help=f"Cache file path (default: ./{CACHE_FILENAME})")
     parser.add_argument("--threads", action="store_true",
                         help="Use threads instead of processes when jobs > 1 (lower overhead).")
+    parser.add_argument("--project", action="store_true",
+                        help="Best-effort cross-file unused function/class suppression (name-based, zero extra deps).")
     return parser
 
 def main() -> int:
@@ -935,6 +1020,8 @@ def main() -> int:
         args.cache = True
     if args.cache_file is None and cfg.get("cache_file"):
         args.cache_file = str(cfg["cache_file"])
+    if not args.project and cfg.get("project"):
+        args.project = True
 
     exclude_globs: list[str] = list(args.exclude_paths or [])
     cfg_exclude = cfg.get("exclude") or []
@@ -979,6 +1066,10 @@ def main() -> int:
         sys.stderr.write("No Python files found.\n")
         return 1
 
+    project_refs: dict[str, set[str]] = {}
+    if args.project and len(files) >= 2:
+        project_refs = _index_project_refs(files)
+
     cache_path = Path(args.cache_file) if args.cache_file else Path(CACHE_FILENAME)
     cache: dict[str, str] = {}
     skipped: list[Path] = []
@@ -1022,6 +1113,9 @@ def main() -> int:
                     results.append(FileResult(Path(futures[fut]), 0, CleaningStats(), [], [], False, "", "", str(exc)))
 
     results.sort(key=lambda r: str(r.path))
+
+    if args.project and project_refs:
+        _apply_project_unused(results, project_refs)
 
     for result in results:
         if result.error is None and result.had_changes and not args.dry_run and not args.warn_only:
