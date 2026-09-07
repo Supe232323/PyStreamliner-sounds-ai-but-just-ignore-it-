@@ -13,10 +13,10 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -25,6 +25,7 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           PKG_VERSION="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
           echo "tag=$TAG  pyproject=$PKG_VERSION"
+          # Accept full match (v1.21.0 == 1.21.0) or major.minor tag (v1.21 == 1.21.0)
           if [ "$TAG" != "$PKG_VERSION" ] && [ "$TAG" != "${PKG_VERSION%.*}" ]; then
             echo "::error::Tag '$GITHUB_REF_NAME' does not match pyproject version '$PKG_VERSION'"
             exit 1
